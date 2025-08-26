@@ -29,10 +29,10 @@ class ContentResult:
         self.screenshot_path = ""
         self.content_hash = ""
         self.file_size = 0
-        self.status_code = None
+        self.status_code = None  # type: Optional[int]
         self.error_message = ""
         self.captured_at = datetime.utcnow()
-        self.capture_duration = 0
+        self.capture_duration = 0.0  # type: float
     
     def set_content_hash(self, content: str):
         """设置内容哈希"""
@@ -87,7 +87,7 @@ class ScreenshotService:
         if self.playwright:
             await self.playwright.stop()
     
-    async def capture_screenshot(self, url: str, filename: str = None) -> Tuple[str, str]:
+    async def capture_screenshot(self, url: str, filename: Optional[str] = None) -> Tuple[str, str]:
         """截取页面截图"""
         if not filename:
             # 生成安全的文件名
@@ -99,6 +99,10 @@ class ScreenshotService:
         
         page = None
         try:
+            # 检查context是否已初始化
+            if self.context is None:
+                raise Exception("浏览器上下文未初始化")
+                
             page = await self.context.new_page()
             
             # 设置超时
@@ -143,6 +147,10 @@ class ScreenshotService:
         screenshot_path = self.screenshot_dir / filename
         
         try:
+            # 检查context是否已初始化
+            if self.context is None:
+                raise Exception("浏览器上下文未初始化，无法创建错误截图")
+                
             page = await self.context.new_page()
             
             # 创建错误页面HTML
@@ -216,8 +224,16 @@ class ContentExtractor:
             # 提取meta描述
             meta_description = ""
             meta_desc = soup.find('meta', attrs={'name': 'description'})
-            if meta_desc:
-                meta_description = meta_desc.get('content', '').strip()
+            # 检查meta_desc是否为Tag类型
+            from bs4 import Tag
+            if isinstance(meta_desc, Tag):
+                content_value = meta_desc.get('content')
+                if content_value is not None:
+                    # 确保content_value是字符串类型
+                    if isinstance(content_value, str):
+                        meta_description = content_value.strip()
+                    elif isinstance(content_value, list) and len(content_value) > 0:
+                        meta_description = content_value[0].strip()
             
             # 提取正文内容
             text_content = soup.get_text()

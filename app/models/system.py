@@ -60,6 +60,12 @@ class SystemConfig(Base):
     @property
     def is_default(self) -> bool:
         """检查是否为默认值"""
+        # 处理None值的情况
+        if self.config_value is None and self.default_value is None:
+            return True
+        if self.config_value is None or self.default_value is None:
+            return False
+        # 比较实际值而不是SQL表达式
         return self.config_value == self.default_value
 
 

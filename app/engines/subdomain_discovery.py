@@ -18,14 +18,14 @@ from app.core.config import settings
 class SubdomainResult:
     """子域名发现结果"""
     
-    def __init__(self, subdomain: str, method: str, ip_address: str = None):
+    def __init__(self, subdomain: str, method: str, ip_address: Optional[str] = None):
         self.subdomain = subdomain.lower().strip()
         self.method = method
         self.ip_address = ip_address
-        self.is_accessible = False
-        self.response_code = None
-        self.response_time = None
-        self.server_header = None
+        self.is_accessible: bool = False
+        self.response_code: Optional[int] = None
+        self.response_time: Optional[float] = None
+        self.server_header: Optional[str] = None
         self.discovered_at = datetime.utcnow()
     
     def __hash__(self):

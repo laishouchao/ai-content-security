@@ -205,7 +205,7 @@ class DomainClassifier:
             ]
         }
     
-    def classify_domain(self, domain: str, context: Dict[str, Any] = None) -> Tuple[str, str, float]:
+    def classify_domain(self, domain: str, context: Optional[Dict[str, Any]] = None) -> Tuple[str, str, float]:
         """对域名进行分类"""
         domain_lower = domain.lower()
         
@@ -503,23 +503,33 @@ class ThirdPartyIdentifierEngine:
             from datetime import datetime, timedelta
             
             async with AsyncSessionLocal() as db:
-                # 查找缓存的域名信息
+                # 计算7天前的时间
+                seven_days_ago = datetime.utcnow() - timedelta(days=7)
+                
+                # 查找缓存的域名信息，并同时检查是否在7天内更新过
                 stmt = select(ThirdPartyDomainCache).where(
                     ThirdPartyDomainCache.domain == domain
+                ).where(
+                    ThirdPartyDomainCache.last_identified_at >= seven_days_ago
                 )
                 
                 result = await db.execute(stmt)
                 cached_domain = result.scalar_one_or_none()
                 
                 if cached_domain:
-                    # 检查是否在7天内更新过
-                    seven_days_ago = datetime.utcnow() - timedelta(days=7)
-                    if cached_domain.last_identified_at >= seven_days_ago:
-                        self.logger.debug(f"找到缓存库中的域名信息: {domain}")
-                        return cached_domain
-                    else:
+                    self.logger.debug(f"找到缓存库中的域名信息: {domain}")
+                    return cached_domain
+                else:
+                    # 检查是否存在但已过期的记录
+                    stmt_check = select(ThirdPartyDomainCache).where(
+                        ThirdPartyDomainCache.domain == domain
+                    )
+                    result_check = await db.execute(stmt_check)
+                    existing_domain = result_check.scalar_one_or_none()
+                    
+                    if existing_domain:
                         self.logger.debug(f"缓存库中的域名信息已过期: {domain}")
-                
+                    
         except Exception as e:
             self.logger.warning(f"检查域名缓存库失败: {e}")
         
