@@ -23,7 +23,7 @@ async def websocket_endpoint(
     
     try:
         # 建立连接
-        connection_id = await websocket_manager.connect(websocket, current_user.id)
+        connection_id = await websocket_manager.connect(websocket, str(current_user.id))
         logger.info(f"WebSocket连接建立: 用户 {current_user.username} ({current_user.id})")
         
         # 处理消息循环
@@ -130,16 +130,17 @@ async def get_task_status(
         if not current_user.is_admin:
             # 这里需要验证任务属于当前用户
             # 由于task_status中没有user_id，我们需要从数据库查询
-            from app.core.database import get_async_session
+            from app.core.database import get_db
             from app.models.task import ScanTask
             from sqlalchemy import select
             
-            async for db in get_async_session():
+            async for db in get_db():
                 stmt = select(ScanTask).where(ScanTask.id == task_id)
                 result = await db.execute(stmt)
                 task = result.scalar_one_or_none()
                 
-                if not task or task.user_id != current_user.id:
+                # 修复类型错误：显式获取user_id值进行比较
+                if not task or str(task.user_id) != str(current_user.id):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="权限不足"
@@ -171,16 +172,17 @@ async def get_task_logs(
     try:
         # 检查用户权限
         if not current_user.is_admin:
-            from app.core.database import get_async_session
+            from app.core.database import get_db
             from app.models.task import ScanTask
             from sqlalchemy import select
             
-            async for db in get_async_session():
+            async for db in get_db():
                 stmt = select(ScanTask).where(ScanTask.id == task_id)
                 result = await db.execute(stmt)
                 task = result.scalar_one_or_none()
                 
-                if not task or task.user_id != current_user.id:
+                # 修复类型错误：显式获取user_id值进行比较
+                if not task or str(task.user_id) != str(current_user.id):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="权限不足"
