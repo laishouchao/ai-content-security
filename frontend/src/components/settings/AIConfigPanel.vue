@@ -1,0 +1,571 @@
+<template>
+  <div class="ai-config-panel">
+    <div class="panel-header">
+      <h3>AI服务配置</h3>
+      <p>配置OpenAI API相关参数，用于违规内容检测</p>
+    </div>
+
+    <el-form
+      ref="formRef"
+      :model="localConfig"
+      :rules="rules"
+      label-width="150px"
+      class="config-form"
+    >
+      <!-- API密钥 -->
+      <el-form-item label="API密钥" prop="openai_api_key" required>
+        <el-input
+          v-model="localConfig.openai_api_key"
+          type="password"
+          placeholder="请输入OpenAI API密钥"
+          show-password
+          clearable
+          @input="handleConfigChange"
+        >
+          <template #append>
+            <el-button @click="testConnection" :loading="testing">
+              测试连接
+            </el-button>
+          </template>
+        </el-input>
+        <div class="form-tip">
+          获取API密钥：<el-link href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</el-link>
+        </div>
+      </el-form-item>
+
+      <!-- API基础URL -->
+      <el-form-item label="API基础URL" prop="openai_api_base">
+        <el-input
+          v-model="localConfig.openai_api_base"
+          placeholder="https://api.openai.com/v1"
+          clearable
+          @input="handleConfigChange"
+        />
+        <div class="form-tip">
+          如使用代理服务，请修改为对应的基础URL
+        </div>
+      </el-form-item>
+
+      <!-- 模型选择 -->
+      <el-form-item label="AI模型" prop="model">
+        <el-select
+          v-model="localConfig.model"
+          placeholder="选择AI模型"
+          @change="handleConfigChange"
+        >
+          <el-option
+            v-for="model in modelOptions"
+            :key="model.value"
+            :label="model.label"
+            :value="model.value"
+          >
+            <div class="model-option">
+              <span class="model-name">{{ model.label }}</span>
+              <span class="model-desc">{{ model.description }}</span>
+            </div>
+          </el-option>
+        </el-select>
+        <div class="form-tip">
+          推荐使用GPT-4 Vision模型以获得最佳图像分析效果
+        </div>
+      </el-form-item>
+
+      <!-- 最大令牌数 -->
+      <el-form-item label="最大令牌数" prop="max_tokens">
+        <el-input-number
+          v-model="localConfig.max_tokens"
+          :min="100"
+          :max="8192"
+          :step="100"
+          @change="handleConfigChange"
+        />
+        <div class="form-tip">
+          控制AI响应的最大长度，建议2048-4096
+        </div>
+      </el-form-item>
+
+      <!-- 温度参数 -->
+      <el-form-item label="温度参数" prop="temperature">
+        <el-slider
+          v-model="localConfig.temperature"
+          :min="0"
+          :max="2"
+          :step="0.1"
+          show-tooltip
+          @change="handleConfigChange"
+        />
+        <div class="form-tip">
+          控制AI响应的随机性，0=确定性，2=高随机性，推荐0.1-0.3
+        </div>
+      </el-form-item>
+
+      <!-- 超时时间 -->
+      <el-form-item label="超时时间" prop="timeout">
+        <el-input-number
+          v-model="localConfig.timeout"
+          :min="5"
+          :max="300"
+          :step="5"
+          @change="handleConfigChange"
+        >
+          <template #append>秒</template>
+        </el-input-number>
+        <div class="form-tip">
+          API请求超时时间，建议30-60秒
+        </div>
+      </el-form-item>
+
+      <!-- 提示词模板 -->
+      <el-form-item label="提示词模板" prop="prompt_template">
+        <el-input
+          v-model="localConfig.prompt_template"
+          type="textarea"
+          :rows="6"
+          placeholder="请输入违规检测的提示词模板"
+          @input="handleConfigChange"
+        />
+        <div class="form-tip">
+          用于指导AI进行违规内容检测的提示词，支持变量替换
+        </div>
+      </el-form-item>
+
+      <!-- 自定义提示词 -->
+      <el-form-item label="自定义提示词">
+        <div class="custom-prompts">
+          <div
+            v-for="(prompt, index) in localConfig.custom_prompts"
+            :key="index"
+            class="prompt-item"
+          >
+            <el-input
+              v-model="prompt.name"
+              placeholder="提示词名称"
+              class="prompt-name"
+              @input="handleConfigChange"
+            />
+            <el-input
+              v-model="prompt.content"
+              type="textarea"
+              placeholder="提示词内容"
+              class="prompt-content"
+              @input="handleConfigChange"
+            />
+            <el-button
+              type="danger"
+              icon="Delete"
+              @click="removePrompt(index)"
+            />
+          </div>
+          
+          <el-button
+            type="primary"
+            icon="Plus"
+            @click="addPrompt"
+            class="add-prompt-btn"
+          >
+            添加自定义提示词
+          </el-button>
+        </div>
+      </el-form-item>
+    </el-form>
+
+    <!-- 操作按钮 -->
+    <div class="panel-actions">
+      <el-button @click="resetToDefault">恢复默认</el-button>
+      <el-button type="primary" @click="saveConfig" :loading="saving">
+        保存配置
+      </el-button>
+    </div>
+
+    <!-- 连接测试结果 -->
+    <el-dialog
+      v-model="testDialogVisible"
+      title="连接测试结果"
+      width="500px"
+    >
+      <div class="test-result">
+        <el-result
+          :icon="testResult.success ? 'success' : 'error'"
+          :title="testResult.success ? '连接成功' : '连接失败'"
+          :sub-title="testResult.message"
+        />
+        
+        <div v-if="testResult.details" class="test-details">
+          <h4>详细信息：</h4>
+          <pre>{{ testResult.details }}</pre>
+        </div>
+      </div>
+      
+      <template #footer>
+        <el-button @click="testDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, watch, onMounted } from 'vue'
+import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { configApi } from '@/api/config'
+import type { AIConfig, CustomPrompt } from '@/types'
+
+// Props和Emits
+interface Props {
+  config: AIConfig
+}
+
+interface Emits {
+  (e: 'update', config: Partial<AIConfig>): void
+  (e: 'save'): void
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<Emits>()
+
+// 表单引用
+const formRef = ref<FormInstance>()
+
+// 响应式数据
+const saving = ref(false)
+const testing = ref(false)
+const testDialogVisible = ref(false)
+const localConfig = reactive<AIConfig>({ ...props.config })
+
+// 测试结果
+const testResult = reactive({
+  success: false,
+  message: '',
+  details: ''
+})
+
+// 模型选项
+const modelOptions = [
+  {
+    value: 'gpt-4-vision-preview',
+    label: 'GPT-4 Vision',
+    description: '支持图像分析的GPT-4模型'
+  },
+  {
+    value: 'gpt-4',
+    label: 'GPT-4',
+    description: '最强大的GPT-4模型'
+  },
+  {
+    value: 'gpt-3.5-turbo',
+    label: 'GPT-3.5 Turbo',
+    description: '快速且经济的模型'
+  },
+  {
+    value: 'gpt-4-turbo-preview',
+    label: 'GPT-4 Turbo',
+    description: '更快的GPT-4版本'
+  }
+]
+
+// 表单验证规则
+const rules = {
+  openai_api_key: [
+    { required: true, message: '请输入OpenAI API密钥', trigger: 'blur' },
+    { min: 10, message: 'API密钥长度不能少于10个字符', trigger: 'blur' }
+  ],
+  openai_api_base: [
+    { required: true, message: '请输入API基础URL', trigger: 'blur' },
+    { type: 'url', message: '请输入有效的URL', trigger: 'blur' }
+  ],
+  model: [
+    { required: true, message: '请选择AI模型', trigger: 'change' }
+  ],
+  max_tokens: [
+    { required: true, message: '请设置最大令牌数', trigger: 'blur' },
+    { type: 'number', min: 100, max: 8192, message: '令牌数应在100-8192之间', trigger: 'blur' }
+  ],
+  temperature: [
+    { required: true, message: '请设置温度参数', trigger: 'blur' },
+    { type: 'number', min: 0, max: 2, message: '温度参数应在0-2之间', trigger: 'blur' }
+  ],
+  timeout: [
+    { required: true, message: '请设置超时时间', trigger: 'blur' },
+    { type: 'number', min: 5, max: 300, message: '超时时间应在5-300秒之间', trigger: 'blur' }
+  ]
+}
+
+// 处理配置变更
+const handleConfigChange = () => {
+  emit('update', { ...localConfig })
+}
+
+// 添加自定义提示词
+const addPrompt = () => {
+  localConfig.custom_prompts.push({
+    name: '',
+    content: '',
+    enabled: true
+  })
+  handleConfigChange()
+}
+
+// 移除自定义提示词
+const removePrompt = (index: number) => {
+  localConfig.custom_prompts.splice(index, 1)
+  handleConfigChange()
+}
+
+// 测试连接
+const testConnection = async () => {
+  if (!localConfig.openai_api_key) {
+    ElMessage.warning('请先输入API密钥')
+    return
+  }
+
+  try {
+    testing.value = true
+    
+    const result = await configApi.testAIConnection({
+      openai_api_key: localConfig.openai_api_key,
+      openai_api_base: localConfig.openai_api_base,
+      model: localConfig.model
+    })
+    
+    testResult.success = result.success
+    testResult.message = result.message
+    testResult.details = result.details || ''
+    
+    testDialogVisible.value = true
+    
+  } catch (error: any) {
+    testResult.success = false
+    testResult.message = error.message || '连接测试失败'
+    testResult.details = error.stack || ''
+    testDialogVisible.value = true
+  } finally {
+    testing.value = false
+  }
+}
+
+// 保存配置
+const saveConfig = async () => {
+  if (!formRef.value) return
+  
+  try {
+    const valid = await formRef.value.validate()
+    if (!valid) return
+    
+    saving.value = true
+    emit('save')
+    
+  } catch (error) {
+    // 验证失败
+  } finally {
+    saving.value = false
+  }
+}
+
+// 恢复默认配置
+const resetToDefault = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要恢复AI配置的默认值吗？',
+      '恢复默认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    const defaultConfig: AIConfig = {
+      openai_api_key: '',
+      openai_api_base: 'https://api.openai.com/v1',
+      model: 'gpt-4-vision-preview',
+      max_tokens: 4096,
+      temperature: 0.1,
+      timeout: 30,
+      prompt_template: `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
+1. 恶意软件、病毒、木马
+2. 钓鱼网站、诈骗信息
+3. 违法违规内容
+4. 侵犯版权的内容
+5. 其他安全风险
+
+请以JSON格式返回分析结果：
+{
+  "is_violation": true/false,
+  "violation_type": "类型",
+  "risk_level": "critical/high/medium/low",
+  "confidence": 0.0-1.0,
+  "reasoning": "判断理由",
+  "evidence": ["证据列表"]
+}`,
+      custom_prompts: []
+    }
+    
+    Object.assign(localConfig, defaultConfig)
+    handleConfigChange()
+    
+    ElMessage.success('已恢复默认配置')
+    
+  } catch (error) {
+    // 用户取消操作
+  }
+}
+
+// 监听props变化
+watch(
+  () => props.config,
+  (newConfig) => {
+    Object.assign(localConfig, newConfig)
+  },
+  { deep: true }
+)
+
+// 组件挂载
+onMounted(() => {
+  // 如果提示词模板为空，设置默认值
+  if (!localConfig.prompt_template) {
+    localConfig.prompt_template = `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
+1. 恶意软件、病毒、木马
+2. 钓鱼网站、诈骗信息
+3. 违法违规内容
+4. 侵犯版权的内容
+5. 其他安全风险
+
+请以JSON格式返回分析结果：
+{
+  "is_violation": true/false,
+  "violation_type": "类型",
+  "risk_level": "critical/high/medium/low",
+  "confidence": 0.0-1.0,
+  "reasoning": "判断理由",
+  "evidence": ["证据列表"]
+}`
+    handleConfigChange()
+  }
+})
+</script>
+
+<style scoped>
+.ai-config-panel {
+  max-width: 800px;
+}
+
+.panel-header {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.panel-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 8px 0;
+}
+
+.panel-header p {
+  color: #909399;
+  font-size: 14px;
+  margin: 0;
+}
+
+.config-form {
+  margin-bottom: 24px;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.model-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-name {
+  font-weight: 500;
+}
+
+.model-desc {
+  font-size: 12px;
+  color: #909399;
+}
+
+.custom-prompts {
+  width: 100%;
+}
+
+.prompt-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+
+.prompt-name {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.prompt-content {
+  flex: 1;
+}
+
+.add-prompt-btn {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #ebeef5;
+}
+
+.test-result {
+  text-align: center;
+}
+
+.test-details {
+  margin-top: 20px;
+  text-align: left;
+}
+
+.test-details h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #303133;
+}
+
+.test-details pre {
+  background-color: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+  max-height: 200px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .config-form :deep(.el-form-item__label) {
+    width: 100px !important;
+  }
+  
+  .prompt-item {
+    flex-direction: column;
+  }
+  
+  .prompt-name {
+    width: 100%;
+  }
+  
+  .panel-actions {
+    flex-direction: column;
+  }
+}
+</style>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="description" content="AI内容安全监控系统 - 域名合规扫描平台" />
+    <meta name="keywords" content="AI,内容安全,域名监控,合规检测,扫描系统" />
+    <meta name="author" content="AI Content Security Team" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AI内容安全监控系统" />
+    <meta property="og:description" content="专业的域名合规扫描和内容安全监控平台" />
+    <meta property="og:image" content="/logo.png" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="AI内容安全监控系统" />
+    <meta property="twitter:description" content="专业的域名合规扫描和内容安全监控平台" />
+    <meta property="twitter:image" content="/logo.png" />
+    
+    <!-- 预加载关键资源 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- 主题色 -->
+    <meta name="theme-color" content="#409eff" />
+    
+    <!-- PWA支持 -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="AI内容安全" />
+    
+    <title>AI内容安全监控系统</title>
+  </head>
+  <body>
+    <div id="app">
+      <!-- 应用加载指示器 -->
+      <div id="loading-screen" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      ">
+        <img src="/logo.svg" alt="Logo" style="width: 64px; height: 64px; margin-bottom: 20px;" />
+        <h1 style="
+          color: #303133;
+          font-size: 24px;
+          font-weight: 600;
+          margin: 0 0 16px 0;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        ">AI内容安全监控</h1>
+        <div style="
+          width: 40px;
+          height: 40px;
+          border: 3px solid #f3f3f3;
+          border-top: 3px solid #409eff;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        "></div>
+        <p style="
+          color: #909399;
+          font-size: 14px;
+          margin: 16px 0 0 0;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        ">系统加载中...</p>
+      </div>
+    </div>
+    
+    <!-- 浏览器兼容性提示 -->
+    <noscript>
+      <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #f5f5f5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      ">
+        <div style="
+          background: white;
+          padding: 40px;
+          border-radius: 8px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+          text-align: center;
+          max-width: 400px;
+        ">
+          <h2 style="color: #f56c6c; margin-bottom: 16px;">JavaScript已禁用</h2>
+          <p style="color: #606266; margin-bottom: 20px;">
+            本应用需要JavaScript支持才能正常运行。<br>
+            请在浏览器设置中启用JavaScript，然后刷新页面。
+          </p>
+          <button 
+            onclick="location.reload()" 
+            style="
+              background: #409eff;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 4px;
+              cursor: pointer;
+              font-size: 14px;
+            "
+          >
+            刷新页面
+          </button>
+        </div>
+      </div>
+    </noscript>
+    
+    <!-- 旧浏览器警告 -->
+    <!--[if lt IE 11]>
+    <div style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #f5f5f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    ">
+      <div style="
+        background: white;
+        padding: 40px;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        text-align: center;
+        max-width: 500px;
+      ">
+        <h2 style="color: #f56c6c; margin-bottom: 16px;">浏览器版本过低</h2>
+        <p style="color: #606266; margin-bottom: 20px;">
+          您正在使用过时的浏览器，这可能导致网站功能异常。<br>
+          请升级到现代浏览器以获得最佳体验。
+        </p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <a href="https://www.google.com/chrome/" target="_blank" 
+             style="text-decoration: none; color: #409eff;">Chrome</a>
+          <a href="https://www.mozilla.org/firefox/" target="_blank" 
+             style="text-decoration: none; color: #409eff;">Firefox</a>
+          <a href="https://www.microsoft.com/edge" target="_blank" 
+             style="text-decoration: none; color: #409eff;">Edge</a>
+        </div>
+      </div>
+    </div>
+    <![endif]-->
+    
+    <style>
+      /* 加载动画 */
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      /* 隐藏加载屏幕 */
+      .app-loaded #loading-screen {
+        opacity: 0;
+        transition: opacity 0.3s ease-out;
+        pointer-events: none;
+      }
+    </style>
+    
+    <script>
+      // 隐藏加载屏幕
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          const loadingScreen = document.getElementById('loading-screen');
+          if (loadingScreen) {
+            loadingScreen.style.display = 'none';
+          }
+        }, 500);
+      });
+      
+      // 错误处理
+      window.addEventListener('error', function(e) {
+        console.error('全局错误:', e);
+      });
+      
+      // 未处理的Promise错误
+      window.addEventListener('unhandledrejection', function(e) {
+        console.error('未处理的Promise错误:', e);
+      });
+    </script>
+    
+    <!-- Vue应用脚本 -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
