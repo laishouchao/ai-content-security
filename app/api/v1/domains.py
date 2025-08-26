@@ -86,8 +86,8 @@ async def get_all_domains(
                 "html_content_path": domain.html_content_path,
                 "is_analyzed": domain.is_analyzed,
                 "analysis_error": domain.analysis_error,
-                "created_at": domain.created_at.isoformat() if domain.created_at else None,
-                "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at else None,
+                "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
+                "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None,
                 # 添加违规记录信息
                 "violations": [
                     {
@@ -174,8 +174,8 @@ async def get_domain_detail(
             "html_content_path": domain.html_content_path,
             "is_analyzed": domain.is_analyzed,
             "analysis_error": domain.analysis_error,
-            "created_at": domain.created_at.isoformat() if domain.created_at else None,
-            "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at else None,
+            "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
+            "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None,
             # 添加违规记录信息
             "violations": [
                 {
@@ -278,7 +278,7 @@ async def get_domain_violations(
                 "ai_model_used": violation.ai_model_used,
                 "evidence": violation.evidence,
                 "recommendations": violation.recommendations,
-                "detected_at": violation.detected_at.isoformat() if violation.detected_at else None
+                "detected_at": violation.detected_at.isoformat() if violation.detected_at is not None else None  # type: ignore
             }
             violation_list.append(violation_data)
         
@@ -374,7 +374,7 @@ async def get_domain_stats(
                 "page_title": domain.page_title,
                 "page_description": domain.page_description,
                 "is_analyzed": domain.is_analyzed,
-                "created_at": domain.created_at.isoformat() if domain.created_at else None,
+                "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
                 "has_violations": len(domain.violations) > 0
             }
             recent_domain_list.append(domain_data)
@@ -423,10 +423,10 @@ async def reanalyze_domain(
             )
         
         # 重置分析状态
-        domain.is_analyzed = False
-        domain.analysis_error = None
-        domain.analyzed_at = None
-        domain.cached_analysis_result = None
+        domain.is_analyzed = False  # type: ignore
+        domain.analysis_error = None  # type: ignore
+        domain.analyzed_at = None  # type: ignore
+        domain.cached_analysis_result = None  # type: ignore
         
         # 清除相关违规记录
         delete_violations_query = select(ViolationRecord).where(
@@ -455,8 +455,8 @@ async def reanalyze_domain(
             "html_content_path": domain.html_content_path,
             "is_analyzed": domain.is_analyzed,
             "analysis_error": domain.analysis_error,
-            "created_at": domain.created_at.isoformat() if domain.created_at else None,
-            "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at else None,
+            "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
+            "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None,
             "has_violations": False
         }
         
@@ -592,8 +592,8 @@ async def export_domains(
                     "page_description": domain.page_description,
                     "found_on_url": domain.found_on_url,
                     "is_analyzed": domain.is_analyzed,
-                    "created_at": domain.created_at.isoformat() if domain.created_at else None,
-                    "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at else None,
+                    "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
+                    "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None,
                     "violation_count": len(domain.violations),
                     "has_violations": len(domain.violations) > 0
                 }
@@ -635,9 +635,9 @@ async def export_domains(
                     domain.page_title or "",
                     domain.page_description or "",
                     domain.found_on_url,
-                    "是" if domain.is_analyzed else "否",
-                    domain.created_at.isoformat() if domain.created_at else "",
-                    domain.analyzed_at.isoformat() if domain.analyzed_at else "",
+                    "是" if domain.is_analyzed is True else "否",
+                    domain.created_at.isoformat() if domain.created_at is not None else "",
+                    domain.analyzed_at.isoformat() if domain.analyzed_at is not None else "",
                     len(domain.violations),
                     "是" if len(domain.violations) > 0 else "否"
                 ])
@@ -673,9 +673,9 @@ async def export_domains(
                         "页面标题": domain.page_title or "",
                         "页面描述": domain.page_description or "",
                         "发现位置": domain.found_on_url,
-                        "是否已分析": "是" if domain.is_analyzed else "否",
-                        "创建时间": domain.created_at.isoformat() if domain.created_at else "",
-                        "分析时间": domain.analyzed_at.isoformat() if domain.analyzed_at else "",
+                        "是否已分析": "是" if domain.is_analyzed is True else "否",
+                        "创建时间": domain.created_at.isoformat() if domain.created_at is not None else "",
+                        "分析时间": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else "",
                         "违规数量": len(domain.violations),
                         "是否有违规": "是" if len(domain.violations) > 0 else "否"
                     })
@@ -685,8 +685,9 @@ async def export_domains(
                 
                 # 写入Excel
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name='域名库', index=False)
+                writer = pd.ExcelWriter(output, engine='openpyxl')  # type: ignore
+                df.to_excel(writer, sheet_name='域名库', index=False)
+                writer.close()
                 
                 excel_data = output.getvalue()
                 output.close()

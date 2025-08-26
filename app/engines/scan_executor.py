@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.core.logging import TaskLogger
 from app.core.config import settings
@@ -518,21 +519,21 @@ class ScanTaskExecutor:
                 domains_to_analyze = []
                 for domain in domains:
                     # 检查是否有7天内的缓存结果
-                    if domain.cached_analysis_result:
+                    if domain.cached_analysis_result is not None:
                         try:
                             # 使用缓存结果
                             cached_result = domain.cached_analysis_result
                             self.logger.info(f"使用缓存的AI分析结果: {domain.domain}")
                             
                             # 标记为已分析
-                            domain.is_analyzed = True
-                            domain.analyzed_at = datetime.utcnow()
+                            domain.is_analyzed = True  # type: ignore
+                            domain.analyzed_at = datetime.utcnow()  # type: ignore
                             
                             # 如果缓存结果中有违规记录，则创建违规记录
                             if cached_result.get('has_violation', False):
                                 # 这里可以创建违规记录，但为了简化，我们只标记为已分析
                                 pass
-                                
+                        
                         except Exception as e:
                             self.logger.warning(f"使用缓存结果失败: {e}")
                             # 如果缓存结果有问题，仍然需要分析
@@ -789,7 +790,6 @@ class ScanTaskExecutor:
     def _extract_domain_from_url(self, url: str) -> Optional[str]:
         """从URL中提取域名"""
         try:
-            from urllib.parse import urlparse
             parsed = urlparse(url)
             if parsed.netloc:
                 domain = parsed.netloc.lower()

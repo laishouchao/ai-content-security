@@ -254,21 +254,21 @@ class TaskMonitorHandler:
     async def _handle_timeout_task(self, task: ScanTask, db: AsyncSession):
         """处理超时任务"""
         try:
-            task.status = TaskStatus.FAILED
-            task.error_message = "任务执行超时（超过12小时）"
-            task.completed_at = datetime.utcnow()
+            task.status = TaskStatus.FAILED  # type: ignore
+            task.error_message = "任务执行超时（超过12小时）"  # type: ignore
+            task.completed_at = datetime.utcnow()  # type: ignore
             
             await db.commit()
             
             # 发送超时通知
             await self.notify_task_completed(
-                task.id, 
-                task.user_id, 
+                task.id,  # type: ignore
+                task.user_id,  # type: ignore
                 TaskStatus.FAILED,
                 {"error": "任务执行超时"}
             )
             
-            logger.warning(f"任务 {task.id} 因超时被标记为失败")
+            logger.warning(f"任务 {task.id} 因超时被标记为失败")  # type: ignore
             
         except Exception as e:
             logger.error(f"处理超时任务失败: {e}")

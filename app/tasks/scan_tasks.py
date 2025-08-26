@@ -207,9 +207,9 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
                         break
                 
                 if screenshot_path:
-                    existing_domain.screenshot_path = screenshot_path
+                    existing_domain.screenshot_path = screenshot_path  # type: ignore
                 if hasattr(scan_result, 'violation_records'):
-                    existing_domain.is_analyzed = True
+                    existing_domain.is_analyzed = True  # type: ignore
             else:
                 # 如果不存在，新建记录
                 # 查找对应的内容结果
