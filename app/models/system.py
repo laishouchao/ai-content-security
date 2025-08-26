@@ -60,13 +60,9 @@ class SystemConfig(Base):
     @property
     def is_default(self) -> bool:
         """检查是否为默认值"""
-        # 处理None值的情况
-        if self.config_value is None and self.default_value is None:
-            return True
-        if self.config_value is None or self.default_value is None:
-            return False
-        # 比较实际值而不是SQL表达式
-        return self.config_value == self.default_value
+        # 显式转换为布尔值以避免类型错误
+        result = self.config_value == self.default_value
+        return bool(result) if not isinstance(result, bool) else result
 
 
 class UserPermission(Base):
@@ -104,12 +100,15 @@ class UserPermission(Base):
         """检查权限是否已过期"""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        result = datetime.utcnow() > self.expires_at
+        return bool(result) if not isinstance(result, bool) else result
     
     @property
     def is_active(self) -> bool:
         """检查权限是否有效"""
-        return self.is_granted and not self.is_expired
+        granted = bool(self.is_granted) if not isinstance(self.is_granted, bool) else self.is_granted
+        expired = bool(self.is_expired) if not isinstance(self.is_expired, bool) else self.is_expired
+        return granted and not expired
 
 
 class LoginAttempt(Base):

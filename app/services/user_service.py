@@ -107,14 +107,14 @@ class UserService:
             raise AuthenticationError("账户已被锁定")
         
         # 验证密码
-        if not password_manager.verify_password(password, user.password_hash):
+        if not password_manager.verify_password(password, str(user.password_hash)):
             await log_login_attempt(
                 username, ip_address, user_agent, False, "密码错误", str(user.id), self.db
             )
             raise AuthenticationError("用户名或密码错误")
         
         # 更新最后登录时间
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.utcnow()  # type: ignore
         await self.db.commit()
         
         await log_login_attempt(
@@ -161,7 +161,7 @@ class UserService:
         for field, value in user_data.dict(exclude_unset=True).items():
             setattr(user, field, value)
         
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow()  # type: ignore
         await self.db.commit()
         await self.db.refresh(user)
         
@@ -175,12 +175,12 @@ class UserService:
             raise NotFoundError("用户不存在")
         
         # 验证当前密码
-        if not password_manager.verify_password(password_data.current_password, user.password_hash):
+        if not password_manager.verify_password(password_data.current_password, str(user.password_hash)):
             raise AuthenticationError("当前密码错误")
         
         # 更新密码
-        user.password_hash = password_manager.hash_password(password_data.new_password)
-        user.updated_at = datetime.utcnow()
+        user.password_hash = password_manager.hash_password(password_data.new_password) # type: ignore
+        user.updated_at = datetime.utcnow()  # type: ignore
         
         await self.db.commit()
         
@@ -206,7 +206,7 @@ class UserService:
         for field, value in user_data.dict(exclude_unset=True).items():
             setattr(user, field, value)
         
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow() # type: ignore
         await self.db.commit()
         await self.db.refresh(user)
         
@@ -285,12 +285,12 @@ class AIConfigService:
         config = result.scalar_one_or_none()
         
         # 解密API密钥
-        if config and config.openai_api_key:
+        if config and config.openai_api_key:    # type: ignore
             try:
-                config.openai_api_key = data_encryption.decrypt_data(config.openai_api_key)
+                config.openai_api_key = data_encryption.decrypt_data(str(config.openai_api_key))    # type: ignore
             except Exception as e:
                 logger.warning(f"解密API密钥失败: {e}")
-                config.openai_api_key = None
+                config.openai_api_key = None    # type: ignore
         
         return config
     
@@ -331,7 +331,7 @@ class AIConfigService:
                 else:
                     setattr(config, field, value)
             
-            config.updated_at = datetime.utcnow()
+            config.updated_at = datetime.utcnow() # type: ignore
         else:
             # 创建新配置
             config_dict = config_data.dict(exclude={"openai_api_key", "ai_model_name"}, exclude_unset=True)
@@ -401,7 +401,7 @@ class AIConfigService:
             test_result = await ai_engine.test_configuration()
             
             # 更新测试时间
-            config.last_tested = datetime.utcnow()
+            config.last_tested = datetime.utcnow()  # type: ignore
             await self.db.commit()
             
             return {
@@ -433,7 +433,7 @@ class AuthService:
         user = await self.user_service.authenticate_user(username, password, ip_address, user_agent)
         
         # 生成令牌
-        token_data = {"sub": user.id, "username": user.username, "role": user.role}
+        token_data = {"sub": user.id, "username": user.username, "role": user.role} # type: ignore
         access_token = token_manager.create_access_token(token_data)
         refresh_token = token_manager.create_refresh_token(token_data)
         
@@ -472,6 +472,32 @@ class AuthService:
         except Exception as e:
             logger.warning(f"刷新令牌失败: {e}")
             raise AuthenticationError("刷新令牌失败")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
