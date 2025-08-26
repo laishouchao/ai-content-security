@@ -316,6 +316,18 @@ class AIConfigService:
                 elif field == "ai_model_name":
                     # 映射ai_model_name到model_name
                     setattr(config, "model_name", value)
+                elif field == "max_tokens":
+                    # 将整数转换为字符串
+                    setattr(config, field, str(value))
+                elif field == "temperature":
+                    # 将浮点数转换为字符串
+                    setattr(config, field, str(value))
+                elif field == "request_timeout":
+                    # 将整数转换为字符串
+                    setattr(config, field, str(value))
+                elif field == "retry_count":
+                    # 将整数转换为字符串
+                    setattr(config, field, str(value))
                 else:
                     setattr(config, field, value)
             
@@ -326,6 +338,23 @@ class AIConfigService:
             # 手动映射ai_model_name字段
             if config_data.ai_model_name is not None:
                 config_dict["model_name"] = config_data.ai_model_name
+            
+            # 将数值类型转换为字符串
+            if "max_tokens" in config_dict:
+                config_dict["max_tokens"] = str(config_dict["max_tokens"])
+            if "temperature" in config_dict:
+                config_dict["temperature"] = str(config_dict["temperature"])
+            if "request_timeout" in config_dict:
+                config_dict["request_timeout"] = str(config_dict["request_timeout"])
+            if "retry_count" in config_dict:
+                config_dict["retry_count"] = str(config_dict["retry_count"])
+            
+            # 确保所有数值字段都被转换为字符串
+            # 这些字段在数据库中是字符串类型，但在请求模型中是数值类型
+            numeric_fields = ["max_tokens", "temperature", "request_timeout", "retry_count"]
+            for field in numeric_fields:
+                if field in config_dict and not isinstance(config_dict[field], str):
+                    config_dict[field] = str(config_dict[field])
             
             config = UserAIConfig(
                 user_id=user_id,
@@ -443,3 +472,7 @@ class AuthService:
         except Exception as e:
             logger.warning(f"刷新令牌失败: {e}")
             raise AuthenticationError("刷新令牌失败")
+
+
+
+

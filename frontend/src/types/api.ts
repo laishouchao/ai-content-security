@@ -51,6 +51,7 @@ export interface AIConfig {
   created_at: string
   updated_at: string
   last_tested?: string
+  openai_api_key?: string
 }
 
 export interface AIConfigRequest {

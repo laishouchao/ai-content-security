@@ -8,47 +8,11 @@
     <el-tabs v-model="activeTab" type="border-card">
       <!-- AI配置 -->
       <el-tab-pane label="AI配置" name="ai">
-        <el-form :model="aiConfig" label-width="120px">
-          <el-form-item label="API提供商">
-            <el-select v-model="aiConfig.provider" style="width: 200px;">
-              <el-option label="OpenAI" value="openai" />
-              <el-option label="DeepSeek" value="deepseek" />
-              <el-option label="本地模型" value="local" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="API密钥">
-            <el-input 
-              v-model="aiConfig.apiKey" 
-              type="password"
-              placeholder="请输入API密钥"
-              style="width: 400px;"
-            />
-          </el-form-item>
-          <el-form-item label="API地址">
-            <el-input 
-              v-model="aiConfig.baseUrl" 
-              placeholder="API基础地址"
-              style="width: 400px;"
-            />
-          </el-form-item>
-          <el-form-item label="模型名称">
-            <el-input 
-              v-model="aiConfig.model" 
-              placeholder="如: gpt-4-vision-preview"
-              style="width: 300px;"
-            />
-          </el-form-item>
-          <el-form-item label="最大令牌">
-            <el-input-number v-model="aiConfig.maxTokens" :min="100" :max="8192" />
-          </el-form-item>
-          <el-form-item label="温度参数">
-            <el-slider v-model="aiConfig.temperature" :min="0" :max="2" :step="0.1" style="width: 200px;" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary">保存配置</el-button>
-            <el-button>测试连接</el-button>
-          </el-form-item>
-        </el-form>
+        <AIConfigPanel 
+          :config="aiConfig" 
+          @update="handleAIConfigUpdate"
+          @save="saveAIConfig"
+        />
       </el-tab-pane>
 
       <!-- 扫描配置 -->
@@ -149,19 +113,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import AIConfigPanel from '@/components/settings/AIConfigPanel.vue'
+import { configApi } from '@/api/config'
+import type { AIConfig, ApiResponse } from '@/types'
 
 const activeTab = ref('ai')
 
-const aiConfig = reactive({
-  provider: 'openai',
-  apiKey: '',
-  baseUrl: 'https://api.openai.com/v1',
-  model: 'gpt-4-vision-preview',
-  maxTokens: 4096,
-  temperature: 0.3
+// AI配置
+const aiConfig = reactive<AIConfig>({
+  id: '',
+  user_id: '',
+  openai_base_url: 'https://api.openai.com/v1',
+  model_name: 'gpt-4-vision-preview',
+  max_tokens: 4096,
+  temperature: 0.1,
+  request_timeout: 30,
+  retry_count: 3,
+  enable_streaming: false,
+  has_valid_config: false,
+  created_at: '',
+  updated_at: '',
+  last_tested: '',
+  openai_api_key: '',
+  system_prompt: '',
+  custom_prompt_template: ''
 })
 
+// 扫描配置
 const scanConfig = reactive({
   concurrency: 10,
   timeout: 30,
@@ -171,6 +151,7 @@ const scanConfig = reactive({
   screenshotQuality: 80
 })
 
+// 通知配置
 const notificationConfig = reactive({
   email: {
     enabled: false,
@@ -181,6 +162,57 @@ const notificationConfig = reactive({
     enabled: false,
     url: ''
   }
+})
+
+// 处理AI配置更新
+const handleAIConfigUpdate = (config: Partial<AIConfig>) => {
+  Object.assign(aiConfig, config)
+}
+
+// 保存AI配置
+const saveAIConfig = async () => {
+  try {
+    const response: ApiResponse<AIConfig> = await configApi.ai.updateConfig({
+      openai_api_key: aiConfig.openai_api_key,
+      openai_base_url: aiConfig.openai_base_url,
+      model_name: aiConfig.model_name,
+      max_tokens: aiConfig.max_tokens,
+      temperature: aiConfig.temperature,
+      request_timeout: aiConfig.request_timeout,
+      retry_count: aiConfig.retry_count,
+      enable_streaming: aiConfig.enable_streaming,
+      system_prompt: aiConfig.system_prompt,
+      custom_prompt_template: aiConfig.custom_prompt_template
+    })
+    
+    if (response.success) {
+      ElMessage.success('AI配置保存成功')
+      // 更新本地配置
+      Object.assign(aiConfig, response.data)
+    } else {
+      ElMessage.error(response.message || '保存失败')
+    }
+  } catch (error) {
+    console.error('保存AI配置失败:', error)
+    ElMessage.error('保存AI配置失败')
+  }
+}
+
+// 获取AI配置
+const fetchAIConfig = async () => {
+  try {
+    const response: ApiResponse<AIConfig> = await configApi.ai.getConfig()
+    if (response.success && response.data) {
+      Object.assign(aiConfig, response.data)
+    }
+  } catch (error) {
+    console.error('获取AI配置失败:', error)
+    ElMessage.error('获取AI配置失败')
+  }
+}
+
+onMounted(() => {
+  fetchAIConfig()
 })
 </script>
 

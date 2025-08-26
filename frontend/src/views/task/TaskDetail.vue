@@ -43,14 +43,14 @@
               {{ task.completed_at ? formatTime(task.completed_at) : '-' }}
             </el-descriptions-item>
             <el-descriptions-item label="发现子域名">
-              <el-tag type="info">{{ (task.total_subdomains || task.statistics?.total_subdomains || 0) }}个</el-tag>
+              <el-tag type="info">{{ (task.total_subdomains || 0) }}个</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="扫描页面">
-              <el-tag type="info">{{ (task.total_pages_crawled || task.statistics?.total_pages_crawled || 0) }}个</el-tag>
+              <el-tag type="info">{{ (task.total_pages_crawled || 0) }}个</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="检测违规">
-              <el-tag :type="(task.total_violations || task.statistics?.total_violations || 0) > 0 ? 'danger' : 'success'">
-                {{ (task.total_violations || task.statistics?.total_violations || 0) }}个
+              <el-tag :type="(task.total_violations || 0) > 0 ? 'danger' : 'success'">
+                {{ (task.total_violations || 0) }}个
               </el-tag>
             </el-descriptions-item>
           </el-descriptions>
@@ -63,7 +63,7 @@
       <el-col :span="12">
         <el-card v-loading="subdomainsLoading">
           <template #header>
-            <span>发现的子域名 ({{ subdomains.length || task.total_subdomains || task.statistics?.total_subdomains || 0 }})</span>
+            <span>发现的子域名 ({{ subdomains.length || task.total_subdomains || 0 }})</span>
           </template>
           <div class="subdomain-list">
             <div 
@@ -90,7 +90,7 @@
       <el-col :span="12">
         <el-card v-loading="violationsLoading">
           <template #header>
-            <span>违规检测结果 ({{ violations.length || task.total_violations || task.statistics?.total_violations || 0 }})</span>
+            <span>违规检测结果 ({{ violations.length || task.total_violations || 0 }})</span>
           </template>
           <div class="violation-list">
             <div 
@@ -147,8 +147,8 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { taskAPI } from '@/api/task'
-import type { Task, SubdomainRecord, ViolationRecord, TaskLog, ThirdPartyDomain } from '@/types/api'
+import { taskAPI, type Task } from '@/api/task'
+import type { SubdomainRecord, ViolationRecord, TaskLog, ThirdPartyDomain } from '@/types/api'
 
 const route = useRoute()
 const taskId = route.params.id
@@ -224,7 +224,7 @@ const fetchTaskDetail = async () => {
     loading.value = true
     const response = await taskAPI.getTask(taskId as string)
     if (response.data.success) {
-      task.value = response.data.data || {} as Task
+      task.value = response.data.data || ({} as Partial<Task> as Task)
     }
   } catch (error) {
     console.error('获取任务详情失败:', error)

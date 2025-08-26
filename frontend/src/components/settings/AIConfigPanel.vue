@@ -34,23 +34,26 @@
       </el-form-item>
 
       <!-- API基础URL -->
-      <el-form-item label="API基础URL" prop="openai_api_base">
+      <el-form-item label="API基础URL" prop="openai_base_url">
         <el-input
-          v-model="localConfig.openai_api_base"
+          v-model="localConfig.openai_base_url"
           placeholder="https://api.openai.com/v1"
           clearable
           @input="handleConfigChange"
         />
         <div class="form-tip">
-          如使用代理服务，请修改为对应的基础URL
+          如使用代理服务或本地模型，请修改为对应的基础URL
         </div>
       </el-form-item>
 
       <!-- 模型选择 -->
-      <el-form-item label="AI模型" prop="model">
+      <el-form-item label="AI模型" prop="model_name">
         <el-select
-          v-model="localConfig.model"
-          placeholder="选择AI模型"
+          v-model="localConfig.model_name"
+          placeholder="选择或输入AI模型"
+          filterable
+          allow-create
+          default-first-option
           @change="handleConfigChange"
         >
           <el-option
@@ -66,7 +69,7 @@
           </el-option>
         </el-select>
         <div class="form-tip">
-          推荐使用GPT-4 Vision模型以获得最佳图像分析效果
+          可选择预设模型或输入自定义模型名称，支持本地兼容OpenAI API的模型
         </div>
       </el-form-item>
 
@@ -75,12 +78,12 @@
         <el-input-number
           v-model="localConfig.max_tokens"
           :min="100"
-          :max="8192"
+          :max="32768"
           :step="100"
           @change="handleConfigChange"
         />
         <div class="form-tip">
-          控制AI响应的最大长度，建议2048-4096
+          控制AI响应的最大长度，建议2048-8192
         </div>
       </el-form-item>
 
@@ -100,9 +103,9 @@
       </el-form-item>
 
       <!-- 超时时间 -->
-      <el-form-item label="超时时间" prop="timeout">
+      <el-form-item label="超时时间" prop="request_timeout">
         <el-input-number
-          v-model="localConfig.timeout"
+          v-model="localConfig.request_timeout"
           :min="5"
           :max="300"
           :step="5"
@@ -115,56 +118,45 @@
         </div>
       </el-form-item>
 
-      <!-- 提示词模板 -->
-      <el-form-item label="提示词模板" prop="prompt_template">
-        <el-input
-          v-model="localConfig.prompt_template"
-          type="textarea"
-          :rows="6"
-          placeholder="请输入违规检测的提示词模板"
-          @input="handleConfigChange"
+      <!-- 重试次数 -->
+      <el-form-item label="重试次数" prop="retry_count">
+        <el-input-number
+          v-model="localConfig.retry_count"
+          :min="1"
+          :max="10"
+          :step="1"
+          @change="handleConfigChange"
         />
         <div class="form-tip">
-          用于指导AI进行违规内容检测的提示词，支持变量替换
+          API请求失败时的重试次数
         </div>
       </el-form-item>
 
-      <!-- 自定义提示词 -->
-      <el-form-item label="自定义提示词">
-        <div class="custom-prompts">
-          <div
-            v-for="(prompt, index) in localConfig.custom_prompts"
-            :key="index"
-            class="prompt-item"
-          >
-            <el-input
-              v-model="prompt.name"
-              placeholder="提示词名称"
-              class="prompt-name"
-              @input="handleConfigChange"
-            />
-            <el-input
-              v-model="prompt.content"
-              type="textarea"
-              placeholder="提示词内容"
-              class="prompt-content"
-              @input="handleConfigChange"
-            />
-            <el-button
-              type="danger"
-              icon="Delete"
-              @click="removePrompt(index)"
-            />
-          </div>
-          
-          <el-button
-            type="primary"
-            icon="Plus"
-            @click="addPrompt"
-            class="add-prompt-btn"
-          >
-            添加自定义提示词
-          </el-button>
+      <!-- 系统提示词 -->
+      <el-form-item label="系统提示词" prop="system_prompt">
+        <el-input
+          v-model="localConfig.system_prompt"
+          type="textarea"
+          :rows="6"
+          placeholder="请输入系统提示词"
+          @input="handleConfigChange"
+        />
+        <div class="form-tip">
+          用于指导AI进行违规内容检测的系统提示词
+        </div>
+      </el-form-item>
+
+      <!-- 自定义提示词模板 -->
+      <el-form-item label="自定义提示词模板" prop="custom_prompt_template">
+        <el-input
+          v-model="localConfig.custom_prompt_template"
+          type="textarea"
+          :rows="4"
+          placeholder="请输入自定义提示词模板"
+          @input="handleConfigChange"
+        />
+        <div class="form-tip">
+          自定义提示词模板，将覆盖系统提示词
         </div>
       </el-form-item>
     </el-form>
@@ -207,7 +199,7 @@
 import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { configApi } from '@/api/config'
-import type { AIConfig, CustomPrompt } from '@/types'
+import type { AIConfig, AIConfigTestResponse, ApiResponse } from '@/types'
 
 // Props和Emits
 interface Props {
@@ -251,14 +243,24 @@ const modelOptions = [
     description: '最强大的GPT-4模型'
   },
   {
+    value: 'gpt-4-turbo',
+    label: 'GPT-4 Turbo',
+    description: '更快的GPT-4版本'
+  },
+  {
     value: 'gpt-3.5-turbo',
     label: 'GPT-3.5 Turbo',
     description: '快速且经济的模型'
   },
   {
-    value: 'gpt-4-turbo-preview',
-    label: 'GPT-4 Turbo',
-    description: '更快的GPT-4版本'
+    value: 'llama3',
+    label: 'Llama 3',
+    description: 'Meta开源的大语言模型'
+  },
+  {
+    value: 'yi-vl-plus',
+    label: 'Yi-VL-Plus',
+    description: '零一万物视觉语言模型'
   }
 ]
 
@@ -268,46 +270,30 @@ const rules = {
     { required: true, message: '请输入OpenAI API密钥', trigger: 'blur' },
     { min: 10, message: 'API密钥长度不能少于10个字符', trigger: 'blur' }
   ],
-  openai_api_base: [
+  openai_base_url: [
     { required: true, message: '请输入API基础URL', trigger: 'blur' },
-    { type: 'url', message: '请输入有效的URL', trigger: 'blur' }
+    { type: 'url' as const, message: '请输入有效的URL', trigger: 'blur' }
   ],
-  model: [
-    { required: true, message: '请选择AI模型', trigger: 'change' }
+  model_name: [
+    { required: true, message: '请选择或输入AI模型名称', trigger: 'change' }
   ],
   max_tokens: [
     { required: true, message: '请设置最大令牌数', trigger: 'blur' },
-    { type: 'number', min: 100, max: 8192, message: '令牌数应在100-8192之间', trigger: 'blur' }
+    { type: 'number' as const, min: 100, max: 32768, message: '令牌数应在100-32768之间', trigger: 'blur' }
   ],
   temperature: [
     { required: true, message: '请设置温度参数', trigger: 'blur' },
-    { type: 'number', min: 0, max: 2, message: '温度参数应在0-2之间', trigger: 'blur' }
+    { type: 'number' as const, min: 0, max: 2, message: '温度参数应在0-2之间', trigger: 'blur' }
   ],
-  timeout: [
+  request_timeout: [
     { required: true, message: '请设置超时时间', trigger: 'blur' },
-    { type: 'number', min: 5, max: 300, message: '超时时间应在5-300秒之间', trigger: 'blur' }
+    { type: 'number' as const, min: 5, max: 300, message: '超时时间应在5-300秒之间', trigger: 'blur' }
   ]
 }
 
 // 处理配置变更
 const handleConfigChange = () => {
   emit('update', { ...localConfig })
-}
-
-// 添加自定义提示词
-const addPrompt = () => {
-  localConfig.custom_prompts.push({
-    name: '',
-    content: '',
-    enabled: true
-  })
-  handleConfigChange()
-}
-
-// 移除自定义提示词
-const removePrompt = (index: number) => {
-  localConfig.custom_prompts.splice(index, 1)
-  handleConfigChange()
 }
 
 // 测试连接
@@ -320,15 +306,19 @@ const testConnection = async () => {
   try {
     testing.value = true
     
-    const result = await configApi.testAIConnection({
-      openai_api_key: localConfig.openai_api_key,
-      openai_api_base: localConfig.openai_api_base,
-      model: localConfig.model
+    const result: ApiResponse<AIConfigTestResponse> = await configApi.ai.testConfig({
+      test_message: "Hello, this is a test message."
     })
     
-    testResult.success = result.success
-    testResult.message = result.message
-    testResult.details = result.details || ''
+    if (result.success) {
+      testResult.success = true
+      testResult.message = result.data?.response_message || '连接测试成功'
+      testResult.details = ''
+    } else {
+      testResult.success = false
+      testResult.message = result.message || '连接测试失败'
+      testResult.details = result.data?.error_message || ''
+    }
     
     testDialogVisible.value = true
     
@@ -373,14 +363,16 @@ const resetToDefault = async () => {
       }
     )
     
-    const defaultConfig: AIConfig = {
+    const defaultConfig: Partial<AIConfig> = {
       openai_api_key: '',
-      openai_api_base: 'https://api.openai.com/v1',
-      model: 'gpt-4-vision-preview',
+      openai_base_url: 'https://api.openai.com/v1',
+      model_name: 'gpt-4-vision-preview',
       max_tokens: 4096,
       temperature: 0.1,
-      timeout: 30,
-      prompt_template: `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
+      request_timeout: 30,
+      retry_count: 3,
+      enable_streaming: false,
+      system_prompt: `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
 1. 恶意软件、病毒、木马
 2. 钓鱼网站、诈骗信息
 3. 违法违规内容
@@ -396,7 +388,7 @@ const resetToDefault = async () => {
   "reasoning": "判断理由",
   "evidence": ["证据列表"]
 }`,
-      custom_prompts: []
+      custom_prompt_template: ''
     }
     
     Object.assign(localConfig, defaultConfig)
@@ -420,9 +412,9 @@ watch(
 
 // 组件挂载
 onMounted(() => {
-  // 如果提示词模板为空，设置默认值
-  if (!localConfig.prompt_template) {
-    localConfig.prompt_template = `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
+  // 如果系统提示词为空，设置默认值
+  if (!localConfig.system_prompt) {
+    localConfig.system_prompt = `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
 1. 恶意软件、病毒、木马
 2. 钓鱼网站、诈骗信息
 3. 违法违规内容

@@ -49,14 +49,14 @@ class User(Base):
     @property
     def is_admin(self) -> bool:
         """检查是否为管理员"""
-        return self.role == UserRole.ADMIN
+        return bool(self.role == UserRole.ADMIN)
     
     @property
     def is_locked(self) -> bool:
         """检查账户是否被锁定"""
         if self.locked_until is None:
             return False
-        return datetime.utcnow() < self.locked_until
+        return bool(datetime.utcnow() < self.locked_until)
 
 
 class UserAIConfig(Base):
@@ -73,7 +73,7 @@ class UserAIConfig(Base):
     
     # 模型配置
     model_name = Column(String(100), default="gpt-4-vision-preview", nullable=False)
-    max_tokens = Column(String(10), default="1000", nullable=False)
+    max_tokens = Column(String(10), default="4096", nullable=False)
     temperature = Column(String(10), default="0.7", nullable=False)
     
     # 提示词配置
@@ -99,7 +99,7 @@ class UserAIConfig(Base):
     @property
     def ai_model_name(self) -> str:
         """获取AI模型名称（映射到model_name字段以避免Pydantic命名冲突）"""
-        return self.model_name
+        return str(self.model_name)
     
     @ai_model_name.setter
     def ai_model_name(self, value: str):
@@ -115,15 +115,15 @@ class UserAIConfig(Base):
     def max_tokens_int(self) -> int:
         """获取最大令牌数的整数值"""
         try:
-            return int(self.max_tokens)
+            return int(str(self.max_tokens))
         except (ValueError, TypeError):
-            return 1000
+            return 4096
     
     @property
     def temperature_float(self) -> float:
         """获取温度的浮点值"""
         try:
-            return float(self.temperature)
+            return float(str(self.temperature))
         except (ValueError, TypeError):
             return 0.7
     
@@ -131,7 +131,7 @@ class UserAIConfig(Base):
     def request_timeout_int(self) -> int:
         """获取请求超时的整数值"""
         try:
-            return int(self.request_timeout)
+            return int(str(self.request_timeout))
         except (ValueError, TypeError):
             return 120
     
@@ -139,6 +139,6 @@ class UserAIConfig(Base):
     def retry_count_int(self) -> int:
         """获取重试次数的整数值"""
         try:
-            return int(self.retry_count)
+            return int(str(self.retry_count))
         except (ValueError, TypeError):
             return 3
