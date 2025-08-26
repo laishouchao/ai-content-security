@@ -3,14 +3,9 @@ export interface User {
   id: string
   username: string
   email: string
-  role: 'admin' | 'user'
+  role: string
   is_active: boolean
-  full_name?: string
-  avatar_url?: string
-  bio?: string
   created_at: string
-  updated_at: string
-  last_login?: string
 }
 
 export interface LoginRequest {
@@ -20,7 +15,6 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   access_token: string
-  refresh_token: string
   token_type: string
   expires_in: number
   user: User
@@ -30,61 +24,47 @@ export interface RegisterRequest {
   username: string
   email: string
   password: string
-  full_name?: string
 }
 
-// AI配置相关类型
-export interface AIConfig {
-  id: string
-  user_id: string
-  openai_base_url: string
-  openai_organization?: string
-  ai_model_name: string
-  max_tokens: number
-  temperature: number
-  system_prompt?: string
-  custom_prompt_template?: string
-  request_timeout: number
-  retry_count: number
-  enable_streaming: boolean
-  has_valid_config: boolean
-  created_at: string
-  updated_at: string
-  last_tested?: string
-  openai_api_key?: string
+// 任务相关类型
+export interface TaskConfig {
+  subdomain_discovery_enabled: boolean
+  link_crawling_enabled: boolean
+  third_party_identification_enabled: boolean
+  content_capture_enabled: boolean
+  ai_analysis_enabled: boolean
+  max_subdomains: number
+  max_crawl_depth: number
+  max_pages_per_domain: number
+  request_delay: number
+  timeout: number
+  max_crawl_iterations?: number // 添加迭代爬取最大次数配置
 }
 
-export interface AIConfigRequest {
-  openai_api_key?: string
-  openai_base_url?: string
-  openai_organization?: string
-  ai_model_name?: string
-  max_tokens?: number
-  temperature?: number
-  system_prompt?: string
-  custom_prompt_template?: string
-  request_timeout?: number
-  retry_count?: number
-  enable_streaming?: boolean
+export interface CreateTaskRequest {
+  target_domain: string
+  task_name?: string
+  description?: string
+  config: Partial<TaskConfig>
 }
 
-export interface AIConfigTestResponse {
-  is_successful: boolean
-  response_message?: string
-  error_message?: string
-  response_time?: number
-  ai_model_used?: string
+export enum TaskStatus {
+  PENDING = 'pending',
+  RUNNING = 'running',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled'
 }
 
-// 扫描任务相关类型
 export interface Task {
   id: string
   user_id: string
   target_domain: string
-  task_name: string | null
+  task_name?: string
+  description?: string
   status: TaskStatus
   progress: number
-  config: Record<string, any>
+  config: TaskConfig
   
   // 统计信息
   total_subdomains: number
@@ -104,28 +84,6 @@ export interface Task {
   error_message?: string
 }
 
-export enum TaskStatus {
-  PENDING = 'pending',
-  RUNNING = 'running',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled'
-}
-
-export interface CreateTaskRequest {
-  target_domain: string
-  config?: {
-    subdomain_discovery_enabled?: boolean
-    link_crawling_enabled?: boolean
-    third_party_identification_enabled?: boolean
-    content_capture_enabled?: boolean
-    ai_analysis_enabled?: boolean
-    max_subdomains?: number
-    max_crawl_depth?: number
-    max_pages_per_domain?: number
-  }
-}
-
 export interface TaskLog {
   id: string
   task_id: string
@@ -134,6 +92,13 @@ export interface TaskLog {
   message: string
   extra_data?: Record<string, any>
   created_at: string
+}
+
+export interface TaskFilter {
+  status?: TaskStatus
+  domain?: string
+  start_date?: string
+  end_date?: string
 }
 
 // 子域名记录
@@ -192,61 +157,23 @@ export interface ViolationRecord {
   detected_at: string
 }
 
-// WebSocket消息类型
-export interface WebSocketMessage {
-  type: string
-  timestamp: string
-  [key: string]: any
+// 域名库筛选条件
+export interface DomainFilter {
+  domain?: string
+  domain_type?: string
+  risk_level?: string
+  has_violations?: boolean
 }
 
-export interface TaskProgressMessage extends WebSocketMessage {
-  type: 'task_progress'
-  task_id: string
-  progress: number
-  stage: string
-  message: string
-}
-
-export interface TaskCompletedMessage extends WebSocketMessage {
-  type: 'task_completed'
-  task_id: string
-  status: string
-  statistics: Record<string, any>
-  message: string
-}
-
-export interface ViolationDetectedMessage extends WebSocketMessage {
-  type: 'violation_detected'
-  task_id: string
-  violation: {
-    domain: string
-    violation_type: string
-    risk_level: string
-    confidence_score: number
-    description: string
-  }
-  message: string
-}
-
-// 通用API响应类型
-export interface ApiResponse<T = any> {
-  success: boolean
-  data?: T
-  message?: string
-  error_code?: string
-  request_id?: string
-}
-
+// 分页参数
 export interface PaginationParams {
   skip?: number
   limit?: number
+  sort?: string
+  order?: 'asc' | 'desc'
 }
 
-export interface TaskFilter {
-  status?: TaskStatus
-  domain?: string
-}
-
+// 分页响应
 export interface PaginatedResponse<T> {
   total: number
   items: T[]
@@ -254,47 +181,9 @@ export interface PaginatedResponse<T> {
   limit: number
 }
 
-// 系统配置
-export interface SystemConfig {
-  scan_limits: {
-    max_concurrent_tasks_per_user: number
-    max_subdomains_per_task: number
-    max_crawl_depth: number
-    task_timeout_hours: number
-  }
-  ai_settings: {
-    default_model: string
-    default_max_tokens: number
-    default_temperature: number
-    request_timeout: number
-    retry_count: number
-  }
-  security: {
-    max_login_attempts: number
-    lockout_duration_minutes: number
-    rate_limit_per_minute: number
-    access_token_expire_minutes: number
-  }
-}
-
-// 统计信息
-export interface Statistics {
-  total_tasks: number
-  completed_tasks: number
-  failed_tasks: number
-  total_violations: number
-  violation_distribution: Record<string, number>
-  domain_type_distribution: Record<string, number>
-  risk_level_distribution: Record<string, number>
-}
-
-// 表单验证规则
-export interface FormRule {
-  required?: boolean
-  message: string
-  trigger?: string | string[]
-  validator?: (rule: any, value: any, callback: any) => void
-  min?: number
-  max?: number
-  pattern?: RegExp
+// WebSocket消息类型
+export interface WebSocketMessage {
+  type: string
+  timestamp: string
+  [key: string]: any
 }

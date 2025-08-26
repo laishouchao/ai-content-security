@@ -17,19 +17,19 @@ class CrawlResult:
     """爬取结果"""
     
     def __init__(self, url: str, domain: str):
-        self.url = url
-        self.domain = domain
-        self.status_code = None
-        self.content_type = None
-        self.page_title = None
-        self.content_length = 0
-        self.response_time = 0
-        self.links = []
-        self.resources = []
-        self.forms = []
-        self.error_message = None
-        self.crawled_at = datetime.utcnow()
-        self.content_hash = None
+        self.url: str = url
+        self.domain: str = domain
+        self.status_code: Optional[int] = None
+        self.content_type: Optional[str] = None
+        self.page_title: Optional[str] = None
+        self.content_length: int = 0
+        self.response_time: float = 0.0
+        self.links: List[str] = []
+        self.resources: List[str] = []
+        self.forms: List[str] = []
+        self.error_message: Optional[str] = None
+        self.crawled_at: datetime = datetime.utcnow()
+        self.content_hash: Optional[str] = None
     
     def set_content_hash(self, content: str):
         """设置内容哈希"""
@@ -179,12 +179,7 @@ class RobotsChecker:
                         
                         # 解析robots.txt
                         rp = RobotFileParser()
-                        rp.set_url(robots_url)
-                        # 将内容转换为行列表
-                        lines = content.split('\n')
-                        for line in lines:
-                            rp.read_urllib_response(line)
-                        
+                        rp.parse(content.splitlines())
                         self.robots_cache[robots_url] = rp
                     else:
                         self.robots_cache[robots_url] = None
@@ -209,7 +204,10 @@ class LinkCrawlerEngine:
         self.failed_urls = set()
         self.discovered_links = set()
         self.discovered_resources = set()
-        
+        self.third_party_crawled_depth = {}  # 记录第三方域名的爬取深度
+        self.all_crawled_links = []  # 全量存储所有爬取到的链接
+        self.found_subdomains = set()  # 记录发现的子域名
+    
     async def crawl_domain(
         self, 
         domain: str, 
@@ -229,6 +227,10 @@ class LinkCrawlerEngine:
         results = []
         urls_to_crawl = set(start_urls)
         current_depth = 0
+        
+        # 清空全量链接存储和发现的子域名
+        self.all_crawled_links = []
+        self.found_subdomains = set()
         
         # 创建HTTP会话
         connector = aiohttp.TCPConnector(
@@ -270,15 +272,34 @@ class LinkCrawlerEngine:
                     if isinstance(result, CrawlResult) and result.status_code:
                         results.append(result)
                         
-                        # 将发现的新链接加入下一轮爬取
+                        # 将爬取到的链接添加到全量存储中
+                        self.all_crawled_links.append(result.url)
+                        
+                        # 将发现的新链接分类处理
                         for link in result.links:
-                            if (self._is_same_domain(link, domain) and 
-                                link not in self.crawled_urls and 
-                                link not in self.failed_urls):
-                                urls_to_crawl.add(link)
+                            if link not in self.crawled_urls and link not in self.failed_urls:
+                                if self._is_same_domain(link, domain):
+                                    # 同域链接，可以继续深入爬取
+                                    urls_to_crawl.add(link)
+                                    
+                                    # 从同域链接中提取子域名
+                                    subdomain = self._extract_subdomain(link, domain)
+                                    if subdomain and subdomain not in self.found_subdomains:
+                                        self.found_subdomains.add(subdomain)
+                                        # 将新发现的子域名也添加到爬取队列中
+                                        subdomain_urls = [f"https://{subdomain}", f"http://{subdomain}"]
+                                        for sub_url in subdomain_urls:
+                                            if sub_url not in self.crawled_urls and sub_url not in self.failed_urls:
+                                                urls_to_crawl.add(sub_url)
+                                # 不再对第三方域名进行深度爬取
+                                # 第三方域名将在扫描执行器中直接处理
                         
                         # 记录发现的资源
                         self.discovered_resources.update(result.resources)
+                        
+                        # 添加资源链接到全量存储
+                        self.all_crawled_links.extend(result.resources)
+                        self.all_crawled_links.extend(result.forms)
                     
                     elif isinstance(result, Exception):
                         self.logger.debug(f"爬取异常: {result}")
@@ -289,6 +310,32 @@ class LinkCrawlerEngine:
         self.logger.info(f"域名爬取完成: 爬取 {len(results)} 个页面，发现 {len(self.discovered_resources)} 个资源，耗时 {duration:.2f} 秒")
         
         return results
+    
+    def _extract_domain(self, url: str) -> str:
+        """从URL中提取域名"""
+        try:
+            parsed = urlparse(url)
+            return parsed.netloc.lower()
+        except:
+            return ""
+    
+    def _extract_subdomain(self, url: str, target_domain: str) -> Optional[str]:
+        """从URL中提取子域名"""
+        try:
+            parsed = urlparse(url)
+            url_domain = parsed.netloc.lower()
+            
+            # 移除端口号
+            if ':' in url_domain:
+                url_domain = url_domain.split(':')[0]
+            
+            # 检查是否为目标域名的子域名
+            if url_domain != target_domain.lower() and url_domain.endswith(f'.{target_domain.lower()}'):
+                return url_domain
+            
+            return None
+        except:
+            return None
     
     async def _crawl_single_page(
         self, 
@@ -376,5 +423,6 @@ class LinkCrawlerEngine:
             'total_failed': len(self.failed_urls),
             'total_resources': len(self.discovered_resources),
             'total_links': len(self.discovered_links),
-            'crawl_success_rate': len(self.crawled_urls) / (len(self.crawled_urls) + len(self.failed_urls)) if (self.crawled_urls or self.failed_urls) else 0
+            'crawl_success_rate': len(self.crawled_urls) / (len(self.crawled_urls) + len(self.failed_urls)) if (self.crawled_urls or self.failed_urls) else 0,
+            'all_crawled_links_count': len(self.all_crawled_links)  # 添加全量链接统计
         }

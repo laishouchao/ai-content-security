@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.v1 import auth, tasks, config, reports, admin, websocket
+from app.api.v1 import auth, tasks, config, reports, admin, websocket, domains
 from app.core.exceptions import CustomException
 from app.core.logging import setup_logging, logger
 from app.core.prometheus import setup_metrics, REQUEST_COUNT, REQUEST_DURATION
@@ -154,6 +154,7 @@ app.include_router(config.router, prefix="/api/v1/config", tags=["配置管理"]
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["报告管理"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["系统管理"])
 app.include_router(websocket.router, prefix="/api/v1/monitor", tags=["实时监控"])
+app.include_router(domains.router, prefix="/api/v1/domains", tags=["域名库"])
 
 
 @app.get("/")

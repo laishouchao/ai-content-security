@@ -23,6 +23,8 @@ const Register = () => import('@/views/Register.vue')
 const TaskList = () => import('@/views/task/TaskList.vue')
 const TaskDetail = () => import('@/views/task/TaskDetail.vue')
 const CreateTask = () => import('@/views/task/CreateTask.vue')
+const DomainLibrary = () => import('@/views/DomainLibrary.vue')
+const DomainDetail = () => import('@/views/DomainDetail.vue')
 const Profile = () => import('@/views/user/Profile.vue')
 const Settings = () => import('@/views/settings/Settings.vue')
 const NotFound = () => import('@/views/error/NotFound.vue')
@@ -88,6 +90,24 @@ const routes: RouteRecordRaw[] = [
         component: TaskDetail,
         meta: {
           title: '任务详情',
+          hidden: true
+        }
+      },
+      {
+        path: 'domains',
+        name: 'DomainLibrary',
+        component: DomainLibrary,
+        meta: {
+          title: '域名库',
+          icon: 'Link'
+        }
+      },
+      {
+        path: 'domains/:id',
+        name: 'DomainDetail',
+        component: DomainDetail,
+        meta: {
+          title: '域名详情',
           hidden: true
         }
       },

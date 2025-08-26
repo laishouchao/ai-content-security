@@ -1,7 +1,8 @@
 // 导出所有API接口
-export { authApi } from './auth'
-export { taskApi } from './task'
-export { configApi } from './config'
+export * from './auth'
+export * from './task'
+export * from './config'
+export * from './domain'
 export { default as http } from './http'
 export { axiosInstance } from './http'
 

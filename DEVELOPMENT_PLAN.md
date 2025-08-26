@@ -118,36 +118,48 @@ class SubdomainDiscoveryEngine:
     async def discover_all(self, domain: str) -> List[SubdomainResult]
 ```
 
-#### 2.2 链接爬取引擎
+#### 2.2 链接爬取引擎（已改进）
 **目标**: 实现智能的网页链接爬取
 **任务列表**:
-- [ ] 网页内容解析和链接提取
-- [ ] 递归爬取深度控制
-- [ ] robots.txt遵循机制
-- [ ] 请求频率控制
-- [ ] 异常页面处理
-- [ ] 爬取结果去重和验证
+- [x] 网页内容解析和链接提取
+- [x] 递归爬取深度控制
+- [x] robots.txt遵循机制
+- [x] 请求频率控制
+- [x] 异常页面处理
+- [x] 爬取结果去重和验证
+- [x] 迭代爬取机制，最大迭代次数为10次
+- [x] 从抓取到的所有链接中分析提取未在第一阶段被发现的子域名
+- [x] 将新发现的子域名补充到子域名中，并重新代入爬取流程
+- [x] 不再对第三方域名进行深度爬取（原限制为2层）
+- [x] 直接将发现的第三方域名记录下来供后续处理
 
 ```python
-# engines/crawler.py
+// engines/link_crawler.py
 class LinkCrawlerEngine:
     async def crawl_page(self, url: str) -> PageResult
     async def extract_links(self, html: str, base_url: str) -> List[str]
     async def crawl_domain(self, domain: str, max_depth: int) -> CrawlResult
+    
+// engines/scan_executor.py
+class ScanTaskExecutor:
+    async def _execute_improved_link_crawling(self, result: ScanExecutionResult, config: Dict[str, Any])
+    async def _extract_subdomains_from_links(self, links: set[str], target_domain: str) -> set[str]
 ```
 
-#### 2.3 第三方域名识别引擎
+#### 2.3 第三方域名识别引擎（已改进）
 **目标**: 精确识别第三方域名和服务
 **任务列表**:
-- [ ] 静态资源域名识别
-- [ ] API接口域名提取
-- [ ] 社交媒体插件识别
-- [ ] 广告和追踪域名检测
-- [ ] CDN和云服务识别
-- [ ] 域名分类和标记
+- [x] 静态资源域名识别
+- [x] API接口域名提取
+- [x] 社交媒体插件识别
+- [x] 广告和追踪域名检测
+- [x] CDN和云服务识别
+- [x] 域名分类和标记
+- [x] 第三方域名直接进入AI分析和第三方域名库
+- [x] 无需对第三方域名进行深度爬取
 
 ```python
-# engines/third_party_identifier.py
+// engines/third_party_identifier.py
 class ThirdPartyIdentifierEngine:
     async def identify_static_resources(self, html: str) -> List[ThirdPartyDomain]
     async def identify_api_endpoints(self, requests: List[Request]) -> List[ThirdPartyDomain]
@@ -167,10 +179,10 @@ class ThirdPartyIdentifierEngine:
 - [ ] 多AI提供商支持框架
 
 ```python
-# models/ai_config.py
+// models/ai_config.py
 class UserAIConfig(Base):
     user_id = Column(String, ForeignKey("users.id"))
-    openai_api_key = Column(String(255))  # 加密存储
+    openai_api_key = Column(String(255))  // 加密存储
     openai_base_url = Column(String(255))
     model_name = Column(String(100))
     max_tokens = Column(Integer, default=1000)
@@ -188,7 +200,7 @@ class UserAIConfig(Base):
 - [ ] 异常处理和重试机制
 
 ```python
-# engines/content_capture.py
+// engines/content_capture.py
 class ContentCaptureEngine:
     async def capture_screenshot(self, url: str) -> str
     async def extract_content(self, url: str) -> ContentResult
@@ -206,7 +218,7 @@ class ContentCaptureEngine:
 - [ ] 批量分析优化
 
 ```python
-# engines/ai_analysis.py
+// engines/ai_analysis.py
 class AIAnalysisEngine:
     async def analyze_content(self, content: str, image_path: str) -> AnalysisResult
     async def build_prompt(self, domain: str, content: str) -> str
@@ -226,7 +238,7 @@ class AIAnalysisEngine:
 - [ ] 资源使用监控
 
 ```python
-# services/task_monitor.py
+// services/task_monitor.py
 class TaskMonitorService:
     async def track_progress(self, task_id: str, progress: int)
     async def log_event(self, task_id: str, level: str, message: str)
@@ -244,7 +256,7 @@ class TaskMonitorService:
 - [ ] 性能优化
 
 ```python
-# websocket/manager.py
+// websocket/manager.py
 class WebSocketManager:
     async def connect(self, websocket: WebSocket, user_id: str)
     async def disconnect(self, websocket: WebSocket, user_id: str)

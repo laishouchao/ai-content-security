@@ -148,6 +148,7 @@ const menuItems = computed(() => {
     { path: '/dashboard', title: '仪表板', icon: 'DataBoard' },
     { path: '/tasks', title: '任务列表', icon: 'List' },
     { path: '/tasks/create', title: '创建任务', icon: 'Plus' },
+    { path: '/domains', title: '域名库', icon: 'Link' },
     { path: '/profile', title: '个人资料', icon: 'User' }
   ]
   

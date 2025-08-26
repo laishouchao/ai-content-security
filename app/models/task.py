@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, DateTime, Boolean, Integer, Float, Text, JSON, ForeignKey
 from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.hybrid import hybrid_property
 from datetime import datetime
 import uuid
 from enum import Enum
@@ -114,24 +115,57 @@ class ScanTask(Base):
     @property
     def duration_seconds(self) -> Optional[int]:
         """获取任务执行时间（秒）"""
-        if self.started_at and self.completed_at:
+        if self.started_at is not None and self.completed_at is not None:
             return int((self.completed_at - self.started_at).total_seconds())
         return None
     
     @property
     def is_running(self) -> bool:
         """检查任务是否正在运行"""
-        return self.status == TaskStatus.RUNNING
+        # 使用getattr安全地获取属性值
+        status = getattr(self, '_status', None) or self.status
+        if hasattr(status, 'value'):
+            return status.value == TaskStatus.RUNNING.value
+        return str(status) == TaskStatus.RUNNING.value
     
     @property
     def is_completed(self) -> bool:
         """检查任务是否已完成"""
-        return self.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+        completed_statuses = [TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value]
+        status = getattr(self, '_status', None) or self.status
+        if hasattr(status, 'value'):
+            return status.value in completed_statuses
+        return str(status) in completed_statuses
     
     @property
     def has_violations(self) -> bool:
         """检查是否有违规记录"""
-        return self.total_violations > 0
+        # 使用SQLAlchemy的类型转换处理
+        try:
+            # 尝试直接访问值
+            violations = self.total_violations
+            if hasattr(violations, 'value'):
+                violations = violations.value
+            # 确保转换为整数并比较
+            return int(str(violations)) > 0
+        except (ValueError, TypeError):
+            # 如果转换失败，返回False
+            return False
+    
+    @property
+    def confidence_percentage(self) -> int:
+        """获取置信度百分比"""
+        try:
+            # 尝试直接访问值
+            score = self.confidence_score
+            if hasattr(score, 'value'):
+                score = score.value
+            # 确保转换为浮点数并计算
+            confidence = float(str(score or 0.0))
+            return int(confidence * 100)
+        except (ValueError, TypeError):
+            # 如果转换失败，返回0
+            return 0
 
 
 class TaskLog(Base):
@@ -223,6 +257,10 @@ class ThirdPartyDomain(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     analyzed_at = Column(DateTime, nullable=True)
     
+    # 添加用于缓存的字段
+    last_identified_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 最后识别时间
+    cached_analysis_result = Column(JSON, nullable=True)  # 缓存的分析结果
+    
     # 关联关系
     task = relationship("ScanTask", back_populates="third_party_domains")
     violations = relationship("ViolationRecord", back_populates="domain", cascade="all, delete-orphan")
@@ -275,9 +313,23 @@ class ViolationRecord(Base):
     @property
     def is_high_risk(self) -> bool:
         """检查是否为高风险违规"""
-        return self.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
+        high_risk_levels = [RiskLevel.HIGH.value, RiskLevel.CRITICAL.value]
+        risk_level = getattr(self, '_risk_level', None) or self.risk_level
+        if hasattr(risk_level, 'value'):
+            return risk_level.value in high_risk_levels
+        return str(risk_level) in high_risk_levels
     
     @property
     def confidence_percentage(self) -> int:
         """获取置信度百分比"""
-        return int(self.confidence_score * 100)
+        try:
+            # 尝试直接访问值
+            score = self.confidence_score
+            if hasattr(score, 'value'):
+                score = score.value
+            # 确保转换为浮点数并计算
+            confidence = float(str(score or 0.0))
+            return int(confidence * 100)
+        except (ValueError, TypeError):
+            # 如果转换失败，返回0
+            return 0
