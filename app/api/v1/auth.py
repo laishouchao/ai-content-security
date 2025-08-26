@@ -139,7 +139,7 @@ async def update_current_user(
     """更新当前用户信息"""
     try:
         user_service = UserService(db)
-        updated_user = await user_service.update_user(current_user.id, user_data)
+        updated_user = await user_service.update_user(str(current_user.id), user_data)
         
         logger.info(f"用户信息更新成功: {current_user.username}")
         return UserResponse.from_orm(updated_user)
@@ -167,7 +167,7 @@ async def change_password(
     """修改密码"""
     try:
         user_service = UserService(db)
-        await user_service.change_password(current_user.id, password_data)
+        await user_service.change_password(str(current_user.id), password_data)
         
         logger.info(f"用户密码修改成功: {current_user.username}")
         return {"message": "密码修改成功"}

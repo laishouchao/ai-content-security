@@ -92,7 +92,8 @@ class TokenManager:
     def decode_token(token: str) -> Optional[Dict[str, Any]]:
         """解码令牌（不验证）"""
         try:
-            return jwt.decode(token, options={"verify_signature": False})
+            # 即使不验证签名，也需要提供key参数，这里使用一个占位符密钥
+            return jwt.decode(token, "", options={"verify_signature": False})
         except JWTError:
             return None
 

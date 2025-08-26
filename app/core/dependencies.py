@@ -42,10 +42,10 @@ async def get_current_user(
         if user is None:
             raise AuthenticationError("用户不存在")
         
-        if not user.is_active:
+        if user.is_active is not True:
             raise AuthenticationError("用户账户已被禁用")
         
-        if user.is_locked:
+        if user.is_locked is True:
             raise AuthenticationError("用户账户已被锁定")
         
         return user
@@ -127,7 +127,9 @@ class RateLimitChecker:
     async def __call__(self, request: Request) -> None:
         """检查速率限制"""
         # 获取客户端IP
-        client_ip = request.client.host
+        client_ip = "unknown"
+        if request.client is not None:
+            client_ip = request.client.host
         if "x-forwarded-for" in request.headers:
             client_ip = request.headers["x-forwarded-for"].split(",")[0].strip()
         
@@ -157,7 +159,7 @@ async def log_login_attempt(
     is_successful: bool,
     failure_reason: Optional[str] = None,
     user_id: Optional[str] = None,
-    db: AsyncSession = None
+    db: Optional[AsyncSession] = None
 ):
     """记录登录尝试"""
     if db is None:
@@ -274,11 +276,13 @@ async def get_current_user_websocket(
     try:
         # 验证Token
         payload = token_manager.verify_token(token)
-        user_id: str = payload.get("sub")
+        user_id = payload.get("sub")
         
         if user_id is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
             raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        
+        user_id = str(user_id)  # 确保user_id是字符串类型
         
         # 查询用户
         from app.core.database import AsyncSessionLocal
@@ -287,7 +291,7 @@ async def get_current_user_websocket(
             result = await db.execute(stmt)
             user = result.scalar_one_or_none()
             
-            if user is None or not user.is_active:
+            if user is None or user.is_active is not True:
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="User not found or inactive")
                 raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="User not found or inactive")
             

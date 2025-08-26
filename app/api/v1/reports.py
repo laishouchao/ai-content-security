@@ -72,6 +72,10 @@ async def export_report(
     # TODO: 实现导出报告逻辑
     logger.info(f"Export report for task_id: {task_id}, format: {format}")
     
+    # 初始化变量
+    media_type = "application/octet-stream"
+    filename = f"report_{task_id}"
+    
     # 根据格式设置响应类型
     if format == "json":
         media_type = "application/json"

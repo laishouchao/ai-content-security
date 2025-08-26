@@ -24,19 +24,20 @@ class StructuredFormatter(logging.Formatter):
         }
         
         # 添加自定义字段
-        if hasattr(record, 'user_id'):
-            log_entry["user_id"] = record.user_id
-        if hasattr(record, 'task_id'):
-            log_entry["task_id"] = record.task_id
-        if hasattr(record, 'request_id'):
-            log_entry["request_id"] = record.request_id
-        if hasattr(record, 'extra'):
-            log_entry["extra"] = record.extra
+        if hasattr(record, '__dict__'):
+            if 'user_id' in record.__dict__:
+                log_entry["user_id"] = record.__dict__['user_id']
+            if 'task_id' in record.__dict__:
+                log_entry["task_id"] = record.__dict__['task_id']
+            if 'request_id' in record.__dict__:
+                log_entry["request_id"] = record.__dict__['request_id']
+            if 'extra' in record.__dict__:
+                log_entry["extra"] = record.__dict__['extra']
             
         # 添加异常信息
         if record.exc_info:
             log_entry["exception"] = {
-                "type": record.exc_info[0].__name__,
+                "type": record.exc_info[0].__name__ if record.exc_info[0] else "Unknown",
                 "message": str(record.exc_info[1]),
                 "traceback": self.formatException(record.exc_info)
             }
@@ -141,12 +142,12 @@ logger = logging.getLogger("app")
 class TaskLogger:
     """任务专用日志记录器"""
     
-    def __init__(self, task_id: str, user_id: str = None):
+    def __init__(self, task_id: str, user_id: str | None = None):
         self.task_id = task_id
         self.user_id = user_id
         self.logger = logging.getLogger("app.tasks")
     
-    def _log(self, level: str, message: str, extra: Dict[str, Any] = None):
+    def _log(self, level: str, message: str, extra: Dict[str, Any] | None = None):
         """记录日志"""
         log_extra = {
             "task_id": self.task_id,
@@ -156,18 +157,18 @@ class TaskLogger:
         
         getattr(self.logger, level.lower())(message, extra=log_extra)
     
-    def info(self, message: str, extra: Dict[str, Any] = None):
+    def info(self, message: str, extra: Dict[str, Any] | None = None):
         """记录信息日志"""
         self._log("INFO", message, extra)
     
-    def warning(self, message: str, extra: Dict[str, Any] = None):
+    def warning(self, message: str, extra: Dict[str, Any] | None = None):
         """记录警告日志"""
         self._log("WARNING", message, extra)
     
-    def error(self, message: str, extra: Dict[str, Any] = None):
+    def error(self, message: str, extra: Dict[str, Any] | None = None):
         """记录错误日志"""
         self._log("ERROR", message, extra)
     
-    def debug(self, message: str, extra: Dict[str, Any] = None):
+    def debug(self, message: str, extra: Dict[str, Any] | None = None):
         """记录调试日志"""
         self._log("DEBUG", message, extra)

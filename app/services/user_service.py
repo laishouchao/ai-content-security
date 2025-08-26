@@ -94,22 +94,22 @@ class UserService:
             )
             raise AuthenticationError("用户名或密码错误")
         
-        if not user.is_active:
+        if user.is_active is not True:
             await log_login_attempt(
-                username, ip_address, user_agent, False, "账户已禁用", user.id, self.db
+                username, ip_address, user_agent, False, "账户已禁用", str(user.id), self.db
             )
             raise AuthenticationError("账户已被禁用")
         
-        if user.is_locked:
+        if user.is_locked is True:
             await log_login_attempt(
-                username, ip_address, user_agent, False, "账户已锁定", user.id, self.db
+                username, ip_address, user_agent, False, "账户已锁定", str(user.id), self.db
             )
             raise AuthenticationError("账户已被锁定")
         
         # 验证密码
         if not password_manager.verify_password(password, user.password_hash):
             await log_login_attempt(
-                username, ip_address, user_agent, False, "密码错误", user.id, self.db
+                username, ip_address, user_agent, False, "密码错误", str(user.id), self.db
             )
             raise AuthenticationError("用户名或密码错误")
         
@@ -118,7 +118,7 @@ class UserService:
         await self.db.commit()
         
         await log_login_attempt(
-            username, ip_address, user_agent, True, None, user.id, self.db
+            username, ip_address, user_agent, True, None, str(user.id), self.db
         )
         
         logger.info(f"用户登录成功: {user.username} from {ip_address}")
@@ -456,7 +456,7 @@ class AuthService:
             
             # 检查用户是否仍然有效
             user = await self.user_service.get_user_by_id(user_id)
-            if not user or not user.is_active:
+            if not user or user.is_active is not True:
                 raise AuthenticationError("用户账户无效")
             
             # 生成新的访问令牌
@@ -472,6 +472,18 @@ class AuthService:
         except Exception as e:
             logger.warning(f"刷新令牌失败: {e}")
             raise AuthenticationError("刷新令牌失败")
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
