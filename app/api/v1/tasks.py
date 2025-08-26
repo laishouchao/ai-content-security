@@ -451,6 +451,84 @@ async def cancel_scan_task(
         )
 
 
+@router.post("/{task_id}/retry")
+async def retry_scan_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """重试扫描任务"""
+    try:
+        # 查询任务
+        query = select(ScanTask).where(
+            and_(
+                ScanTask.id == task_id,
+                ScanTask.user_id == current_user.id
+            )
+        )
+        result = await db.execute(query)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在或无权访问"
+            )
+        
+        # 检查任务是否可以重试
+        if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"任务状态为 {task.status}，无法重试"
+            )
+        
+        # 重置任务状态和相关字段
+        from sqlalchemy import update
+        stmt = update(ScanTask).where(ScanTask.id == task_id).values(
+            status=TaskStatus.PENDING,
+            progress=0,
+            started_at=None,
+            completed_at=None,
+            error_message=None,
+            error_code=None,
+            # 重置统计信息
+            total_subdomains=0,
+            total_pages_crawled=0,
+            total_third_party_domains=0,
+            total_violations=0,
+            critical_violations=0,
+            high_violations=0,
+            medium_violations=0,
+            low_violations=0
+        )
+        await db.execute(stmt)
+        
+        await db.commit()
+        
+        # 发送任务创建通知
+        await task_monitor.notify_task_created(task_id, str(current_user.id), task.target_domain)
+        
+        # 启动异步任务
+        from celery_app import celery_app
+        celery_app.send_task("scan_domain_task", args=[task_id, str(current_user.id), task.target_domain, task.config])
+        
+        logger.info(f"扫描任务已重试: {task_id} - {task.target_domain}")
+        
+        return {
+            "success": True,
+            "message": "任务已重新启动"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"重试扫描任务失败: {e}")
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
+            detail="重试扫描任务失败"
+        )
+
+
 @router.get("/{task_id}/status")
 async def get_task_status(
     task_id: str,
@@ -794,6 +872,8 @@ async def get_task_third_party_domains(
             status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
             detail="获取第三方域名记录失败"
         )
+
+
 
 
 

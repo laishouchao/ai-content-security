@@ -141,7 +141,7 @@ class TaskAPI {
   
   // 停止任务
   async stopTask(taskId: string): Promise<AxiosResponse<ApiResponse<void>>> {
-    return http.post(`/tasks/${taskId}/stop`)
+    return http.post(`/tasks/${taskId}/cancel`)
   }
   
   // 重试任务

@@ -113,7 +113,7 @@ async def _update_task_status(
     task_id: str, 
     status: TaskStatus, 
     progress: int, 
-    message: str = None
+    message: str = None # type: ignore
 ):
     """更新任务状态"""
     try:
@@ -149,7 +149,7 @@ async def _log_task_event(
     level: str,
     module: str,
     message: str,
-    extra_data: Dict[str, Any] = None
+    extra_data: Dict[str, Any] = None   # type: ignore
 ):
     """记录任务事件"""
     try:
@@ -354,6 +354,6 @@ from celery.schedules import crontab
 celery_app.conf.beat_schedule = {
     'cleanup-old-tasks': {
         'task': 'cleanup_old_tasks',
-        'schedule': crontab(hour=2, minute=0),  # 每天凌晨2点执行
+        'schedule': crontab(hour=2, minute=0),  # 每天凌晨2点执行   # type: ignore
     },
 }

@@ -254,10 +254,18 @@ const stopTask = async (row: Task) => {
       type: 'warning'
     })
     
-    // TODO: 实现停止任务逻辑
-    ElMessage.success('任务已停止')
-  } catch {
-    // 用户取消
+    // 实际调用API停止任务
+    const response = await taskAPI.stopTask(row.id)
+    if (response.data.success) {
+      ElMessage.success('任务已停止')
+      // 重新加载任务列表
+      searchTasks()
+    } else {
+      ElMessage.error(response.data.message || '停止任务失败')
+    }
+  } catch (error) {
+    console.error('停止任务失败:', error)
+    ElMessage.error('停止任务失败')
   }
 }
 
@@ -269,10 +277,18 @@ const retryTask = async (row: Task) => {
       type: 'info'
     })
     
-    // TODO: 实现重试任务逻辑
-    ElMessage.success('任务已重新启动')
-  } catch {
-    // 用户取消
+    // 实际调用API重试任务
+    const response = await taskAPI.retryTask(row.id)
+    if (response.data.success) {
+      ElMessage.success('任务已重新启动')
+      // 重新加载任务列表
+      searchTasks()
+    } else {
+      ElMessage.error(response.data.message || '重试任务失败')
+    }
+  } catch (error) {
+    console.error('重试任务失败:', error)
+    ElMessage.error('重试任务失败')
   }
 }
 

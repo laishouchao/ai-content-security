@@ -140,6 +140,7 @@ const collapsed = ref(false)
 
 // 计算属性
 const activeMenu = computed(() => route.path)
+
 const currentPageTitle = computed(() => route.meta.title || '未知页面')
 
 // 菜单项（根据用户权限显示）

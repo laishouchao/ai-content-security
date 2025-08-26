@@ -81,7 +81,7 @@ class TaskMonitorHandler:
         await websocket_manager.broadcast_to_task_subscribers(task_id, notification)
         logger.debug(f"任务进度通知: {task_id} - {progress}% - {stage}")
     
-    async def notify_task_completed(self, task_id: str, user_id: str, status: str, statistics: Dict[str, Any] = None):
+    async def notify_task_completed(self, task_id: str, user_id: str, status: str, statistics: Dict[str, Any] = None):  # type: ignore
         """通知任务完成"""
         message = {
             "type": "task_completed",
@@ -151,9 +151,9 @@ class TaskMonitorHandler:
                     "status": task.status,
                     "progress": task.progress,
                     "target_domain": task.target_domain,
-                    "created_at": task.created_at.isoformat() if task.created_at else None,
-                    "started_at": task.started_at.isoformat() if task.started_at else None,
-                    "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                    "created_at": task.created_at.isoformat() if task.created_at else None, # type: ignore
+                    "started_at": task.started_at.isoformat() if task.started_at else None, # type: ignore
+                    "completed_at": task.completed_at.isoformat() if task.completed_at else None,   # type: ignore
                     "statistics": {
                         "total_subdomains": task.total_subdomains,
                         "total_pages_crawled": task.total_pages_crawled,
@@ -170,7 +170,7 @@ class TaskMonitorHandler:
             logger.error(f"获取任务状态失败: {e}")
             return None
     
-    async def get_task_logs(self, task_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_task_logs(self, task_id: str, limit: int = 50) -> List[Dict[str, Any]]:   # type: ignore
         """获取任务日志"""
         try:
             async for db in get_db():
@@ -223,7 +223,7 @@ class TaskMonitorHandler:
                 # 检查长时间运行的任务
                 current_time = datetime.utcnow()
                 for task in running_tasks:
-                    if task.started_at:
+                    if task.started_at: # type: ignore
                         duration = (current_time - task.started_at).total_seconds()
                         
                         # 如果任务运行超过6小时，发送警告
@@ -248,8 +248,8 @@ class TaskMonitorHandler:
             "timestamp": datetime.utcnow().isoformat()
         }
         
-        await websocket_manager.broadcast_to_user(task.user_id, message)
-        await websocket_manager.broadcast_to_task_subscribers(task.id, message)
+        await websocket_manager.broadcast_to_user(task.user_id, message)    # type: ignore
+        await websocket_manager.broadcast_to_task_subscribers(task.id, message) # type: ignore
     
     async def _handle_timeout_task(self, task: ScanTask, db: AsyncSession):
         """处理超时任务"""
@@ -280,7 +280,7 @@ class TaskMonitorHandler:
             TaskStatus.FAILED: "失败",
             TaskStatus.CANCELLED: "取消"
         }
-        return status_map.get(status, status)
+        return status_map.get(status, status)   # type: ignore
 
 
 # 全局任务监控处理器实例
