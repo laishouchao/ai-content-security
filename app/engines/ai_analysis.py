@@ -44,7 +44,9 @@ class OpenAIClient:
     
     async def __aenter__(self):
         """异步上下文管理器入口"""
-        timeout = aiohttp.ClientTimeout(total=self.ai_config.request_timeout_int)
+        # 使用用户配置的超时时间，如果未设置则使用默认值30秒
+        timeout_seconds = self.ai_config.request_timeout_int if self.ai_config.request_timeout_int > 0 else 30
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.session = aiohttp.ClientSession(timeout=timeout)
         return self
     
@@ -62,6 +64,13 @@ class OpenAIClient:
         """调用OpenAI API进行内容分析"""
         if not self.session:
             raise RuntimeError("OpenAI客户端未初始化")
+        
+        # 检查必要的配置
+        if not self.ai_config.openai_api_key:
+            raise ValueError("缺少OpenAI API密钥")
+        
+        if not self.ai_config.ai_model_name:
+            raise ValueError("缺少AI模型名称")
         
         # 获取解密的API密钥
         try:
@@ -102,12 +111,19 @@ class OpenAIClient:
                         }
                     ]
                 }
-            ],
-            "max_tokens": self.ai_config.max_tokens_int,
-            "temperature": self.ai_config.temperature_float
+            ]
         }
         
-        retry_count = retry_count or self.ai_config.retry_count_int
+        # 只有当temperature大于0时才添加到请求中
+        if self.ai_config.temperature_float > 0:
+            request_data["temperature"] = self.ai_config.temperature_float
+        
+        # 只有当max_tokens大于0时才添加到请求中
+        if self.ai_config.max_tokens_int > 0:
+            request_data["max_tokens"] = self.ai_config.max_tokens_int
+        
+        # 使用用户配置的重试次数，如果未设置则默认为3次
+        retry_count = retry_count or self.ai_config.retry_count_int or 3
         last_error = None
         
         for attempt in range(retry_count + 1):
@@ -191,9 +207,22 @@ class AIAnalysisEngine:
         self.ai_config = ai_config
         self.logger = TaskLogger(task_id, "ai_analysis")
         
-        # 配置验证
-        if not self.ai_config or not self.ai_config.has_valid_config:
-            raise ValueError("用户AI配置无效或缺失")
+        # 配置验证 - 确保有有效的AI配置
+        if not self.ai_config:
+            raise ValueError("缺少用户AI配置")
+        
+        if not self.ai_config.has_valid_config:
+            raise ValueError("用户AI配置无效或不完整")
+        
+        # 验证必要的配置项
+        if not self.ai_config.openai_api_key:
+            raise ValueError("缺少OpenAI API密钥")
+        
+        if not self.ai_config.ai_model_name:
+            raise ValueError("缺少AI模型名称")
+        
+        if not self.ai_config.openai_base_url:
+            raise ValueError("缺少OpenAI基础URL")
     
     async def analyze_domains(self, domains: List[ThirdPartyDomain]) -> List[ViolationRecord]:
         """批量分析第三方域名"""
@@ -423,7 +452,7 @@ class AIAnalysisEngine:
             return {
                 "success": True,
                 "message": "AI配置测试成功",
-                "model": self.ai_config.ai_model_name,
+                "ai_model_used": self.ai_config.ai_model_name,
                 "response_preview": response.get('choices', [{}])[0].get('message', {}).get('content', '')[:100]
             }
             
@@ -431,7 +460,7 @@ class AIAnalysisEngine:
             return {
                 "success": False,
                 "message": f"AI配置测试失败: {e}",
-                "model": self.ai_config.ai_model_name
+                "ai_model_used": self.ai_config.ai_model_name
             }
     
     def _create_test_image_base64(self) -> str:

@@ -119,7 +119,7 @@ class AIConfigRequest(BaseModel):
     openai_base_url: Optional[str] = Field("https://api.openai.com/v1", description="OpenAI API基础URL")
     openai_organization: Optional[str] = Field(None, description="OpenAI组织ID")
     ai_model_name: Optional[str] = Field("gpt-4-vision-preview", description="模型名称")
-    max_tokens: Optional[int] = Field(4096, ge=1, le=32768, description="最大令牌数")
+    max_tokens: Optional[int] = Field(4096, ge=0, le=32768, description="最大令牌数，0表示无限制")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="温度参数")
     system_prompt: Optional[str] = Field(None, max_length=2000, description="系统提示词")
     custom_prompt_template: Optional[str] = Field(None, max_length=5000, description="自定义提示词模板")

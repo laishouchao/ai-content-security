@@ -52,13 +52,15 @@ http.interceptors.response.use(
     
     // 检查业务状态码
     if (data && typeof data === 'object') {
-      if (data.success === false) {
+      // 如果响应中包含success字段且为false，则视为错误
+      if ('success' in data && data.success === false) {
         const message = data.message || '请求失败'
         ElMessage.error(message)
         return Promise.reject(new Error(message))
       }
     }
     
+    // 确保返回完整的响应对象
     return response
   },
   (error) => {

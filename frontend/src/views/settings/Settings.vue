@@ -125,12 +125,12 @@ const activeTab = ref('ai')
 const aiConfig = reactive<AIConfig>({
   id: '',
   user_id: '',
-  openai_base_url: 'https://api.openai.com/v1',
-  model_name: 'gpt-4-vision-preview',
-  max_tokens: 4096,
-  temperature: 0.1,
-  request_timeout: 30,
-  retry_count: 3,
+  openai_base_url: '',
+  ai_model_name: '',
+  max_tokens: 0,
+  temperature: 0,
+  request_timeout: 0,
+  retry_count: 0,
   enable_streaming: false,
   has_valid_config: false,
   created_at: '',
@@ -175,7 +175,7 @@ const saveAIConfig = async () => {
     const response: ApiResponse<AIConfig> = await configApi.ai.updateConfig({
       openai_api_key: aiConfig.openai_api_key,
       openai_base_url: aiConfig.openai_base_url,
-      model_name: aiConfig.model_name,
+      ai_model_name: aiConfig.ai_model_name,
       max_tokens: aiConfig.max_tokens,
       temperature: aiConfig.temperature,
       request_timeout: aiConfig.request_timeout,
@@ -185,16 +185,21 @@ const saveAIConfig = async () => {
       custom_prompt_template: aiConfig.custom_prompt_template
     })
     
-    if (response.success) {
+    // 检查响应格式 - 后端直接返回AIConfig对象而不是包装在ApiResponse中
+    if (response && response.data) {
       ElMessage.success('AI配置保存成功')
       // 更新本地配置
       Object.assign(aiConfig, response.data)
+    } else if (response) {
+      // 如果响应本身就是AIConfig对象（没有包装在data中）
+      ElMessage.success('AI配置保存成功')
+      Object.assign(aiConfig, response)
     } else {
-      ElMessage.error(response.message || '保存失败')
+      ElMessage.error('保存失败')
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('保存AI配置失败:', error)
-    ElMessage.error('保存AI配置失败')
+    ElMessage.error(error.message || '保存AI配置失败')
   }
 }
 
@@ -202,8 +207,34 @@ const saveAIConfig = async () => {
 const fetchAIConfig = async () => {
   try {
     const response: ApiResponse<AIConfig> = await configApi.ai.getConfig()
-    if (response.success && response.data) {
+    
+    // 检查响应格式 - 后端直接返回AIConfig对象而不是包装在ApiResponse中
+    if (response && response.data) {
+      // 确保正确更新aiConfig对象
       Object.assign(aiConfig, response.data)
+    } else if (response) {
+      // 如果响应本身就是AIConfig对象（没有包装在data中）
+      Object.assign(aiConfig, response)
+    } else {
+      // 如果没有配置，初始化一个空配置
+      Object.assign(aiConfig, {
+        id: '',
+        user_id: '',
+        openai_base_url: '',
+        ai_model_name: '',
+        max_tokens: 0,
+        temperature: 0,
+        request_timeout: 0,
+        retry_count: 0,
+        enable_streaming: false,
+        has_valid_config: false,
+        created_at: '',
+        updated_at: '',
+        last_tested: '',
+        openai_api_key: '',
+        system_prompt: '',
+        custom_prompt_template: ''
+      })
     }
   } catch (error) {
     console.error('获取AI配置失败:', error)

@@ -721,8 +721,13 @@ async def get_task_third_party_domains(
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
         
-        # 查询第三方域名记录列表
-        query = select(ThirdPartyDomain).where(
+        # 查询第三方域名记录列表，包含违规记录
+        from sqlalchemy.orm import selectinload
+        from app.models.task import ViolationRecord
+        
+        query = select(ThirdPartyDomain).options(
+            selectinload(ThirdPartyDomain.violations)
+        ).where(
             and_(*conditions)
         ).order_by(ThirdPartyDomain.created_at.desc()).offset(skip).limit(limit)
         
@@ -747,7 +752,27 @@ async def get_task_third_party_domains(
                 "is_analyzed": domain.is_analyzed,
                 "analysis_error": domain.analysis_error,
                 "created_at": domain.created_at.isoformat() if domain.created_at is not None else None,
-                "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None
+                "analyzed_at": domain.analyzed_at.isoformat() if domain.analyzed_at is not None else None,
+                # 添加违规记录信息
+                "violations": [
+                    {
+                        "id": violation.id,
+                        "task_id": violation.task_id,
+                        "domain_id": violation.domain_id,
+                        "violation_type": violation.violation_type,
+                        "confidence_score": violation.confidence_score,
+                        "risk_level": violation.risk_level,
+                        "title": violation.title,
+                        "description": violation.description,
+                        "content_snippet": violation.content_snippet,
+                        "ai_analysis_result": violation.ai_analysis_result,
+                        "ai_model_used": violation.ai_model_used,
+                        "evidence": violation.evidence,
+                        "recommendations": violation.recommendations,
+                        "detected_at": violation.detected_at.isoformat() if violation.detected_at is not None else None
+                    }
+                    for violation in domain.violations
+                ] if domain.violations else []
             }
             domain_list.append(domain_data)
         
@@ -769,6 +794,8 @@ async def get_task_third_party_domains(
             status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
             detail="获取第三方域名记录失败"
         )
+
+
 
 
 

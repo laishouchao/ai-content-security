@@ -27,17 +27,16 @@ async def get_ai_config(
         config = await ai_service.get_user_ai_config(str(current_user.id))
         
         if not config:
-            # 返回默认配置
-            from app.core.config import settings
+            # 返回空配置而不是默认配置
             return AIConfigResponse(
                 id="",
                 user_id=str(current_user.id),
-                openai_base_url="https://api.openai.com/v1",
-                ai_model_name=settings.DEFAULT_AI_MODEL,
-                max_tokens=settings.DEFAULT_MAX_TOKENS,
-                temperature=settings.DEFAULT_TEMPERATURE,
-                request_timeout=settings.AI_REQUEST_TIMEOUT,
-                retry_count=settings.AI_RETRY_COUNT,
+                openai_base_url="",
+                ai_model_name="",
+                max_tokens=0,
+                temperature=0.0,
+                request_timeout=0,
+                retry_count=0,
                 enable_streaming=False,
                 has_valid_config=False,
                 created_at=datetime.utcnow(),

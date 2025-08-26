@@ -39,7 +39,7 @@ export interface AIConfig {
   user_id: string
   openai_base_url: string
   openai_organization?: string
-  model_name: string
+  ai_model_name: string
   max_tokens: number
   temperature: number
   system_prompt?: string
@@ -58,7 +58,7 @@ export interface AIConfigRequest {
   openai_api_key?: string
   openai_base_url?: string
   openai_organization?: string
-  model_name?: string
+  ai_model_name?: string
   max_tokens?: number
   temperature?: number
   system_prompt?: string
@@ -73,7 +73,7 @@ export interface AIConfigTestResponse {
   response_message?: string
   error_message?: string
   response_time?: number
-  model_used?: string
+  ai_model_used?: string
 }
 
 // 扫描任务相关类型
@@ -170,6 +170,8 @@ export interface ThirdPartyDomain {
   created_at: string
   analyzed_at?: string
   violations?: ViolationRecord[]
+  // 添加一个计算属性用于判断是否有违规
+  has_violations?: boolean
 }
 
 // 违规记录

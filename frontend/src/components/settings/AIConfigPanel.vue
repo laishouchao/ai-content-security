@@ -12,27 +12,6 @@
       label-width="150px"
       class="config-form"
     >
-      <!-- API密钥 -->
-      <el-form-item label="API密钥" prop="openai_api_key" required>
-        <el-input
-          v-model="localConfig.openai_api_key"
-          type="password"
-          placeholder="请输入OpenAI API密钥"
-          show-password
-          clearable
-          @input="handleConfigChange"
-        >
-          <template #append>
-            <el-button @click="testConnection" :loading="testing">
-              测试连接
-            </el-button>
-          </template>
-        </el-input>
-        <div class="form-tip">
-          获取API密钥：<el-link href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</el-link>
-        </div>
-      </el-form-item>
-
       <!-- API基础URL -->
       <el-form-item label="API基础URL" prop="openai_base_url">
         <el-input
@@ -46,30 +25,36 @@
         </div>
       </el-form-item>
 
-      <!-- 模型选择 -->
-      <el-form-item label="AI模型" prop="model_name">
-        <el-select
-          v-model="localConfig.model_name"
-          placeholder="选择或输入AI模型"
-          filterable
-          allow-create
-          default-first-option
-          @change="handleConfigChange"
-        >
-          <el-option
-            v-for="model in modelOptions"
-            :key="model.value"
-            :label="model.label"
-            :value="model.value"
-          >
-            <div class="model-option">
-              <span class="model-name">{{ model.label }}</span>
-              <span class="model-desc">{{ model.description }}</span>
-            </div>
-          </el-option>
-        </el-select>
+      <!-- API密钥 -->
+      <el-form-item label="API密钥" prop="openai_api_key" required>
+        <el-input
+          v-model="localConfig.openai_api_key"
+          type="password"
+          placeholder="请输入OpenAI API密钥"
+          show-password
+          clearable
+          @input="handleConfigChange"
+        />
         <div class="form-tip">
-          可选择预设模型或输入自定义模型名称，支持本地兼容OpenAI API的模型
+          获取API密钥：<el-link href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</el-link>
+        </div>
+      </el-form-item>
+
+      <!-- 模型选择 -->
+      <el-form-item label="AI模型" prop="ai_model_name">
+        <div style="display: flex; gap: 10px;">
+          <el-input
+            v-model="localConfig.ai_model_name"
+            placeholder="请输入AI模型名称"
+            clearable
+            @input="handleConfigChange"
+          />
+          <el-button @click="testConnection" :loading="testing" type="primary">
+            测试连接
+          </el-button>
+        </div>
+        <div class="form-tip">
+          请输入AI模型名称，支持本地兼容OpenAI API的模型
         </div>
       </el-form-item>
 
@@ -77,13 +62,13 @@
       <el-form-item label="最大令牌数" prop="max_tokens">
         <el-input-number
           v-model="localConfig.max_tokens"
-          :min="100"
+          :min="0"
           :max="32768"
           :step="100"
           @change="handleConfigChange"
         />
         <div class="form-tip">
-          控制AI响应的最大长度，建议2048-8192
+          控制AI响应的最大长度，设置为0表示无限制，建议2048-8192
         </div>
       </el-form-item>
 
@@ -221,6 +206,7 @@ const formRef = ref<FormInstance>()
 const saving = ref(false)
 const testing = ref(false)
 const testDialogVisible = ref(false)
+// 使用传入的配置初始化localConfig
 const localConfig = reactive<AIConfig>({ ...props.config })
 
 // 测试结果
@@ -229,40 +215,6 @@ const testResult = reactive({
   message: '',
   details: ''
 })
-
-// 模型选项
-const modelOptions = [
-  {
-    value: 'gpt-4-vision-preview',
-    label: 'GPT-4 Vision',
-    description: '支持图像分析的GPT-4模型'
-  },
-  {
-    value: 'gpt-4',
-    label: 'GPT-4',
-    description: '最强大的GPT-4模型'
-  },
-  {
-    value: 'gpt-4-turbo',
-    label: 'GPT-4 Turbo',
-    description: '更快的GPT-4版本'
-  },
-  {
-    value: 'gpt-3.5-turbo',
-    label: 'GPT-3.5 Turbo',
-    description: '快速且经济的模型'
-  },
-  {
-    value: 'llama3',
-    label: 'Llama 3',
-    description: 'Meta开源的大语言模型'
-  },
-  {
-    value: 'yi-vl-plus',
-    label: 'Yi-VL-Plus',
-    description: '零一万物视觉语言模型'
-  }
-]
 
 // 表单验证规则
 const rules = {
@@ -274,12 +226,12 @@ const rules = {
     { required: true, message: '请输入API基础URL', trigger: 'blur' },
     { type: 'url' as const, message: '请输入有效的URL', trigger: 'blur' }
   ],
-  model_name: [
-    { required: true, message: '请选择或输入AI模型名称', trigger: 'change' }
+  ai_model_name: [
+    { required: true, message: '请输入AI模型名称', trigger: 'blur' }
   ],
   max_tokens: [
     { required: true, message: '请设置最大令牌数', trigger: 'blur' },
-    { type: 'number' as const, min: 100, max: 32768, message: '令牌数应在100-32768之间', trigger: 'blur' }
+    { type: 'number' as const, min: 0, max: 32768, message: '令牌数应在0-32768之间，0表示无限制', trigger: 'blur' }
   ],
   temperature: [
     { required: true, message: '请设置温度参数', trigger: 'blur' },
@@ -303,29 +255,55 @@ const testConnection = async () => {
     return
   }
 
+  if (!localConfig.ai_model_name) {
+    ElMessage.warning('请先选择或输入AI模型名称')
+    return
+  }
+
   try {
     testing.value = true
     
-    const result: ApiResponse<AIConfigTestResponse> = await configApi.ai.testConfig({
-      test_message: "Hello, this is a test message."
+    // 构建符合OpenAI API格式的测试请求
+    const testPayload = {
+      model: localConfig.ai_model_name,
+      messages: [
+        {
+          role: "user",
+          content: "Hello, this is a test message. Please respond with 'Test successful' in English."
+        }
+      ],
+      max_tokens: localConfig.max_tokens > 0 ? localConfig.max_tokens : undefined,
+      temperature: localConfig.temperature
+    }
+    
+    // 直接调用OpenAI API进行测试
+    const response = await fetch(`${localConfig.openai_base_url}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localConfig.openai_api_key}`
+      },
+      body: JSON.stringify(testPayload)
     })
     
-    if (result.success) {
+    if (response.ok) {
+      const data = await response.json()
       testResult.success = true
-      testResult.message = result.data?.response_message || '连接测试成功'
-      testResult.details = ''
+      testResult.message = '连接测试成功'
+      testResult.details = data.choices?.[0]?.message?.content || '测试成功但无内容返回'
     } else {
+      const errorData = await response.json()
       testResult.success = false
-      testResult.message = result.message || '连接测试失败'
-      testResult.details = result.data?.error_message || ''
+      testResult.message = `连接测试失败: ${response.status} ${response.statusText}`
+      testResult.details = errorData.error?.message || '未知错误'
     }
     
     testDialogVisible.value = true
     
   } catch (error: any) {
     testResult.success = false
-    testResult.message = error.message || '连接测试失败'
-    testResult.details = error.stack || ''
+    testResult.message = '连接测试失败'
+    testResult.details = error.message || '网络错误或服务器无响应'
     testDialogVisible.value = true
   } finally {
     testing.value = false
@@ -366,7 +344,7 @@ const resetToDefault = async () => {
     const defaultConfig: Partial<AIConfig> = {
       openai_api_key: '',
       openai_base_url: 'https://api.openai.com/v1',
-      model_name: 'gpt-4-vision-preview',
+      ai_model_name: 'gpt-4-vision-preview',
       max_tokens: 4096,
       temperature: 0.1,
       request_timeout: 30,
@@ -405,15 +383,23 @@ const resetToDefault = async () => {
 watch(
   () => props.config,
   (newConfig) => {
-    Object.assign(localConfig, newConfig)
+    // 只有当新配置不为空时才更新localConfig
+    if (newConfig && Object.keys(newConfig).length > 0) {
+      Object.assign(localConfig, newConfig)
+    }
   },
   { deep: true }
 )
 
 // 组件挂载
 onMounted(() => {
-  // 如果系统提示词为空，设置默认值
-  if (!localConfig.system_prompt) {
+  // 确保使用传入的配置，而不是默认配置
+  if (props.config && Object.keys(props.config).length > 0) {
+    Object.assign(localConfig, props.config)
+  }
+  
+  // 如果系统提示词为空，设置默认值（仅在创建新配置时）
+  if (!localConfig.system_prompt && !localConfig.id) {
     localConfig.system_prompt = `请分析这个网页的内容和截图，判断是否包含以下类型的违规内容：
 1. 恶意软件、病毒、木马
 2. 钓鱼网站、诈骗信息
@@ -468,21 +454,6 @@ onMounted(() => {
   color: #909399;
   margin-top: 4px;
   line-height: 1.4;
-}
-
-.model-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.model-name {
-  font-weight: 500;
-}
-
-.model-desc {
-  font-size: 12px;
-  color: #909399;
 }
 
 .custom-prompts {

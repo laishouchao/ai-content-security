@@ -86,29 +86,62 @@
         </el-card>
       </el-col>
 
-      <!-- 违规检测结果 -->
+      <!-- 第三方域名列表 -->
       <el-col :span="12">
-        <el-card v-loading="violationsLoading">
+        <el-card v-loading="domainsLoading">
           <template #header>
-            <span>违规检测结果 ({{ violations.length || task.total_violations || 0 }})</span>
+            <span>第三方域名 ({{ thirdPartyDomains.length || task.total_third_party_domains || 0 }})</span>
           </template>
-          <div class="violation-list">
+          <div class="domain-list">
             <div 
-              v-for="violation in violations" 
-              :key="violation.id"
-              class="violation-item"
+              v-for="domain in thirdPartyDomains" 
+              :key="domain.id"
+              class="domain-item"
             >
-              <div class="violation-header">
-                <span class="violation-title">{{ violation.title }}</span>
-                <el-tag :type="getRiskType(violation.risk_level)" size="small">
-                  {{ getRiskText(violation.risk_level) }}风险
-                </el-tag>
+              <div class="domain-header">
+                <span class="domain-name">{{ domain.domain }}</span>
+                <div class="domain-tags">
+                  <!-- 违规标签 -->
+                  <el-tag 
+                    v-if="domain.has_violations" 
+                    :type="getRiskType(domain.risk_level)" 
+                    size="small"
+                  >
+                    {{ getRiskText(domain.risk_level) }}风险
+                  </el-tag>
+                  <!-- 未违规标签 -->
+                  <el-tag v-else type="success" size="small">合规</el-tag>
+                  <!-- 域名类型标签 -->
+                  <el-tag type="info" size="small">{{ getDomainTypeText(domain.domain_type) }}</el-tag>
+                </div>
               </div>
-              <div class="violation-content">
-                <p class="violation-desc">{{ violation.description }}</p>
-                <div class="violation-meta">
-                  <span class="confidence">置信度: {{ Math.round(violation.confidence_score * 100) }}%</span>
-                  <span class="domain">域名: {{ getDomainName(violation.domain_id) }}</span>
+              <div class="domain-content">
+                <p class="domain-desc">{{ domain.page_title || '无标题' }}</p>
+                <div class="domain-meta">
+                  <span class="found-url">发现于: {{ domain.found_on_url }}</span>
+                  <span class="analyzed-status">
+                    {{ domain.is_analyzed ? '已分析' : '未分析' }}
+                  </span>
+                </div>
+                <!-- 违规详情 -->
+                <div v-if="domain.has_violations && domain.violations && domain.violations.length > 0" class="violation-details">
+                  <div 
+                    v-for="violation in domain.violations" 
+                    :key="violation.id"
+                    class="violation-item"
+                  >
+                    <div class="violation-header">
+                      <span class="violation-title">{{ violation.title }}</span>
+                      <el-tag :type="getRiskType(violation.risk_level)" size="small">
+                        {{ getRiskText(violation.risk_level) }}风险
+                      </el-tag>
+                    </div>
+                    <p class="violation-desc">{{ violation.description }}</p>
+                    <div class="violation-meta">
+                      <span class="confidence">置信度: {{ Math.round(violation.confidence_score * 100) }}%</span>
+                      <span class="violation-type">{{ getViolationTypeText(violation.violation_type) }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -156,12 +189,11 @@ const taskId = route.params.id
 // 响应式状态
 const loading = ref(false)
 const subdomainsLoading = ref(false)
-const violationsLoading = ref(false)
+const domainsLoading = ref(false)
 const logsLoading = ref(false)
 
 const task = ref<Task>({} as Task)
 const subdomains = ref<SubdomainRecord[]>([])
-const violations = ref<ViolationRecord[]>([])
 const logs = ref<TaskLog[]>([])
 const thirdPartyDomains = ref<ThirdPartyDomain[]>([])
 
@@ -208,14 +240,38 @@ const getRiskText = (risk: string) => {
   return riskMap[risk] || risk
 }
 
-const formatTime = (time: string) => {
-  return new Date(time).toLocaleString('zh-CN')
+// 域名类型文本映射
+const getDomainTypeText = (type: string) => {
+  const typeMap: Record<string, string> = {
+    'cdn': 'CDN',
+    'analytics': '分析',
+    'advertising': '广告',
+    'social': '社交',
+    'api': 'API',
+    'payment': '支付',
+    'security': '安全',
+    'unknown': '未知'
+  }
+  return typeMap[type] || type
 }
 
-// 根据domain_id获取域名名称
-const getDomainName = (domainId: string) => {
-  const domain = thirdPartyDomains.value.find(d => d.id === domainId)
-  return domain ? domain.domain : '-'
+// 违规类型文本映射
+const getViolationTypeText = (type: string) => {
+  const typeMap: Record<string, string> = {
+    'nsfw': '色情内容',
+    'violence': '暴力内容',
+    'gambling': '赌博',
+    'fraud': '诈骗',
+    'malware': '恶意软件',
+    'hate_speech': '仇恨言论',
+    'copyright': '侵权',
+    'other': '其他'
+  }
+  return typeMap[type] || type
+}
+
+const formatTime = (time: string) => {
+  return new Date(time).toLocaleString('zh-CN')
 }
 
 // 获取任务详情
@@ -250,19 +306,28 @@ const fetchSubdomains = async () => {
   }
 }
 
-// 获取违规记录
-const fetchViolations = async () => {
+// 获取第三方域名列表
+const fetchThirdPartyDomains = async () => {
   try {
-    violationsLoading.value = true
-    const response = await taskAPI.getViolations(taskId as string)
+    domainsLoading.value = true
+    const response = await taskAPI.getThirdPartyDomains(taskId as string)
     if (response.data.success) {
-      violations.value = response.data.data?.items || []
+      // 获取第三方域名列表
+      const domains = response.data.data?.items || []
+      
+      // 为每个域名添加has_violations属性
+      const domainsWithViolations = domains.map(domain => ({
+        ...domain,
+        has_violations: domain.violations && domain.violations.length > 0
+      }))
+      
+      thirdPartyDomains.value = domainsWithViolations
     }
   } catch (error) {
-    console.error('获取违规记录失败:', error)
-    ElMessage.error('获取违规记录失败')
+    console.error('获取第三方域名失败:', error)
+    ElMessage.error('获取第三方域名失败')
   } finally {
-    violationsLoading.value = false
+    domainsLoading.value = false
   }
 }
 
@@ -282,26 +347,12 @@ const fetchLogs = async () => {
   }
 }
 
-// 获取第三方域名
-const fetchThirdPartyDomains = async () => {
-  try {
-    const response = await taskAPI.getThirdPartyDomains(taskId as string)
-    if (response.data.success) {
-      thirdPartyDomains.value = response.data.data?.items || []
-    }
-  } catch (error) {
-    console.error('获取第三方域名失败:', error)
-    ElMessage.error('获取第三方域名失败')
-  }
-}
-
 onMounted(() => {
   if (taskId) {
     fetchTaskDetail()
     fetchSubdomains()
-    fetchViolations()
-    fetchLogs()
     fetchThirdPartyDomains()
+    fetchLogs()
   }
 })
 </script>
@@ -368,25 +419,88 @@ onMounted(() => {
   color: #999;
 }
 
-.violation-list {
+.domain-list {
   max-height: 400px;
   overflow-y: auto;
 }
 
-.violation-item {
+.domain-item {
   padding: 12px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 
-.violation-item:last-child {
+.domain-item:last-child {
   border-bottom: none;
+}
+
+.domain-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.domain-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.domain-tags {
+  display: flex;
+  gap: 6px;
+}
+
+.domain-content {
+  margin-left: 12px;
+}
+
+.domain-desc {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.domain-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.found-url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analyzed-status {
+  min-width: 50px;
+}
+
+.violation-details {
+  margin-top: 12px;
+  padding: 10px;
+  background-color: #fff5f5;
+  border-radius: 4px;
+  border-left: 3px solid #f56c6c;
+}
+
+.violation-item {
+  padding: 8px 0;
+}
+
+.violation-item:not(:last-child) {
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .violation-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .violation-title {
@@ -396,7 +510,7 @@ onMounted(() => {
 
 .violation-desc {
   margin: 0 0 8px 0;
-  font-size: 14px;
+  font-size: 13px;
   color: #666;
   line-height: 1.4;
 }

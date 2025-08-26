@@ -408,7 +408,7 @@ class AIConfigService:
                 "is_successful": test_result["success"],
                 "response_message": test_result["message"],
                 "response_time": None,
-                "ai_model_used": test_result["model"]
+                "ai_model_used": test_result["model"]  # 修复字段名，从"model"改为"ai_model_used"
             }
             
         except Exception as e:
@@ -472,6 +472,10 @@ class AuthService:
         except Exception as e:
             logger.warning(f"刷新令牌失败: {e}")
             raise AuthenticationError("刷新令牌失败")
+
+
+
+
 
 
 
