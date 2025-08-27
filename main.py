@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.v1 import auth, tasks, config, reports, admin, websocket, domains, domain_whitelist, performance
+from app.api.v1 import auth, tasks, config, reports, admin, websocket, domains, domain_whitelist, performance, cache
 from app.core.exceptions import CustomException
 from app.core.logging import setup_logging, logger
 from app.core.prometheus import setup_metrics, REQUEST_COUNT, REQUEST_DURATION
@@ -17,6 +17,7 @@ from app.websocket.manager import websocket_manager
 from app.websocket.handlers import task_monitor
 from app.core.redis_lock import lock_manager
 from app.core.memory_manager import memory_manager
+from app.core.cache_manager import cache_manager
 
 
 @asynccontextmanager
@@ -52,6 +53,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"内存管理器启动失败: {e}")
     
+    # 初始化缓存管理器
+    try:
+        await cache_manager.initialize()
+        logger.info("缓存管理器初始化成功")
+    except Exception as e:
+        logger.error(f"缓存管理器初始化失败: {e}")
+    
     yield
     
     # 关闭时执行
@@ -76,6 +84,13 @@ async def lifespan(app: FastAPI):
         logger.info("内存管理器已停止")
     except Exception as e:
         logger.error(f"内存管理器停止失败: {e}")
+    
+    # 关闭缓存管理器
+    try:
+        await cache_manager.close()
+        logger.info("缓存管理器已关闭")
+    except Exception as e:
+        logger.error(f"缓存管理器关闭失败: {e}")
 
 
 app = FastAPI(
@@ -187,6 +202,7 @@ app.include_router(websocket.router, prefix="/api/v1/monitor", tags=["实时监�
 app.include_router(domains.router, prefix="/api/v1/domains", tags=["域名库"])
 app.include_router(domain_whitelist.router, prefix="/api/v1/domain-lists", tags=["域名白名单"])
 app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])
+app.include_router(cache.router, prefix="/api/v1/cache", tags=["缓存管理"])
 
 
 @app.get("/")

@@ -87,142 +87,6 @@
         </el-card>
       </el-tab-pane>
 
-      <!-- 性能监控 -->
-      <el-tab-pane label="性能监控" name="performance">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-card>
-              <template #header>
-                <div class="card-header">
-                  <span>系统性能</span>
-                  <el-button @click="refreshPerformance" :loading="performanceLoading">
-                    <el-icon><Refresh /></el-icon>
-                    刷新
-                  </el-button>
-                </div>
-              </template>
-              
-              <div v-if="performanceStats">
-                <div class="performance-item">
-                  <span class="perf-label">CPU使用率</span>
-                  <el-progress 
-                    :percentage="performanceStats.system_health?.cpu_percent || 0" 
-                    :stroke-width="8"
-                    :color="getPerformanceColor(performanceStats.system_health?.cpu_percent || 0)"
-                  />
-                </div>
-                <div class="performance-item">
-                  <span class="perf-label">内存使用率</span>
-                  <el-progress 
-                    :percentage="performanceStats.memory_stats?.memory_info?.process_memory?.percent || 0" 
-                    :stroke-width="8"
-                    :color="getPerformanceColor(performanceStats.memory_stats?.memory_info?.process_memory?.percent || 0)"
-                  />
-                </div>
-                <div class="performance-item">
-                  <span class="perf-label">磁盘使用率</span>
-                  <el-progress 
-                    :percentage="performanceStats.system_health?.disk_usage?.percent || 0" 
-                    :stroke-width="8"
-                    :color="getPerformanceColor(performanceStats.system_health?.disk_usage?.percent || 0)"
-                  />
-                </div>
-                <div class="performance-item">
-                  <span class="perf-label">健康分数</span>
-                  <el-progress 
-                    :percentage="performanceStats.overall_health_score || 0" 
-                    :stroke-width="8"
-                    :color="getHealthColor(performanceStats.overall_health_score || 0)"
-                  />
-                </div>
-              </div>
-            </el-card>
-          </el-col>
-          
-          <el-col :span="12">
-            <el-card>
-              <template #header>
-                <span>服务状态</span>
-              </template>
-              
-              <div v-if="performanceStats">
-                <div class="service-item">
-                  <span class="service-label">数据库连接</span>
-                  <el-tag 
-                    :type="performanceStats.database_stats?.connection_pool?.available_connections > 0 ? 'success' : 'danger'"
-                  >
-                    {{ performanceStats.database_stats?.connection_pool?.available_connections || 0 }} 可用
-                  </el-tag>
-                </div>
-                <div class="service-item">
-                  <span class="service-label">Redis连接</span>
-                  <el-tag 
-                    :type="performanceStats.redis_stats?.connected ? 'success' : 'danger'"
-                  >
-                    {{ performanceStats.redis_stats?.connected ? '已连接' : '断开' }}
-                  </el-tag>
-                </div>
-                <div class="service-item">
-                  <span class="service-label">Celery任务</span>
-                  <el-tag type="info">
-                    {{ performanceStats.celery_stats?.metrics?.active_tasks || 0 }} 活跃
-                  </el-tag>
-                </div>
-                <div class="service-item">
-                  <span class="service-label">内存压力</span>
-                  <el-tag 
-                    :type="performanceStats.memory_stats?.memory_pressure ? 'warning' : 'success'"
-                  >
-                    {{ performanceStats.memory_stats?.memory_pressure ? '高' : '正常' }}
-                  </el-tag>
-                </div>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
-
-        <!-- 系统操作 -->
-        <el-card style="margin-top: 20px;">
-          <template #header>
-            <span>系统操作</span>
-          </template>
-          
-          <div class="system-actions-grid">
-            <el-button 
-              type="warning" 
-              @click="clearCache" 
-              :loading="clearingCache"
-            >
-              <el-icon><Delete /></el-icon>
-              清理缓存
-            </el-button>
-            <el-button 
-              type="success" 
-              @click="performHealthCheck" 
-              :loading="checkingHealth"
-            >
-              <el-icon><CircleCheck /></el-icon>
-              健康检查
-            </el-button>
-            <el-button 
-              type="primary" 
-              @click="optimizeSystem" 
-              :loading="optimizing"
-            >
-              <el-icon><Tools /></el-icon>
-              系统优化
-            </el-button>
-            <el-button 
-              type="danger" 
-              @click="confirmRestart"
-            >
-              <el-icon><RefreshRight /></el-icon>
-              重启系统
-            </el-button>
-          </div>
-        </el-card>
-      </el-tab-pane>
-
       <!-- 系统信息 -->
       <el-tab-pane label="系统信息" name="info">
         <el-card>
@@ -235,14 +99,10 @@
             <el-descriptions-item label="Python版本">{{ systemInfo.python_version || 'Python 3.9+' }}</el-descriptions-item>
             <el-descriptions-item label="数据库">{{ systemInfo.database || 'PostgreSQL' }}</el-descriptions-item>
             <el-descriptions-item label="缓存">{{ systemInfo.cache || 'Redis' }}</el-descriptions-item>
-            <el-descriptions-item label="运行时间">
-              {{ formatUptime(performanceStats?.system_health?.uptime) }}
-            </el-descriptions-item>
+            <el-descriptions-item label="运行时间">{{ systemInfo.uptime || 'N/A' }}</el-descriptions-item>
             <el-descriptions-item label="进程ID">{{ systemInfo.process_id || 'N/A' }}</el-descriptions-item>
-            <el-descriptions-item label="CPU核心数">{{ performanceStats?.system_health?.cpu_cores || 'N/A' }}</el-descriptions-item>
-            <el-descriptions-item label="总内存">
-              {{ formatBytes(performanceStats?.system_health?.total_memory) }}
-            </el-descriptions-item>
+            <el-descriptions-item label="CPU核心数">{{ systemInfo.cpu_cores || 'N/A' }}</el-descriptions-item>
+            <el-descriptions-item label="总内存">{{ systemInfo.total_memory || 'N/A' }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-tab-pane>
@@ -252,14 +112,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Refresh, 
-  Delete, 
-  CircleCheck, 
-  Tools, 
-  RefreshRight 
-} from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import AIConfigPanel from '@/components/settings/AIConfigPanel.vue'
 import { configApi } from '@/api/config'
 import http from '@/api/http'
@@ -268,10 +121,6 @@ import type { AIConfig, ApiResponse } from '@/types'
 const activeTab = ref('ai')
 const loading = ref(false)
 const saving = ref(false)
-const performanceLoading = ref(false)
-const clearingCache = ref(false)
-const checkingHealth = ref(false)
-const optimizing = ref(false)
 
 // AI配置
 const aiConfig = reactive<AIConfig>({
@@ -316,8 +165,7 @@ const systemConfig = reactive({
   }
 })
 
-// 性能统计数据
-const performanceStats = ref<any>(null)
+// 系统信息
 const systemInfo = ref<any>(null)
 
 // 处理AI配置更新
@@ -428,141 +276,10 @@ const saveSystemConfig = async () => {
   }
 }
 
-// 获取性能统计
-const refreshPerformance = async () => {
-  try {
-    performanceLoading.value = true
-    const response = await http.get('/performance/stats')
-    
-    if (response.data.success) {
-      performanceStats.value = response.data.data
-    }
-  } catch (error) {
-    console.error('获取性能统计失败:', error)
-    ElMessage.error('获取性能统计失败')
-  } finally {
-    performanceLoading.value = false
-  }
-}
-
-// 清理缓存
-const clearCache = async () => {
-  try {
-    clearingCache.value = true
-    await http.post('/performance/cache/clear')
-    ElMessage.success('缓存清理成功')
-    await refreshPerformance()
-  } catch (error) {
-    console.error('清理缓存失败:', error)
-    ElMessage.error('清理缓存失败')
-  } finally {
-    clearingCache.value = false
-  }
-}
-
-// 健康检查
-const performHealthCheck = async () => {
-  try {
-    checkingHealth.value = true
-    const response = await http.get('/performance/health')
-    
-    if (response.data.success) {
-      const healthData = response.data.data
-      const status = healthData.status
-      
-      if (status === 'healthy') {
-        ElMessage.success('系统健康检查通过')
-      } else if (status === 'warning') {
-        ElMessage.warning('系统健康检查发现警告')
-      } else {
-        ElMessage.error('系统健康检查发现问题')
-      }
-      
-      await refreshPerformance()
-    }
-  } catch (error) {
-    console.error('健康检查失败:', error)
-    ElMessage.error('健康检查失败')
-  } finally {
-    checkingHealth.value = false
-  }
-}
-
-// 系统优化
-const optimizeSystem = async () => {
-  try {
-    optimizing.value = true
-    await http.post('/performance/optimize')
-    ElMessage.success('系统优化完成')
-    await refreshPerformance()
-  } catch (error) {
-    console.error('系统优化失败:', error)
-    ElMessage.error('系统优化失败')
-  } finally {
-    optimizing.value = false
-  }
-}
-
-// 确认重启
-const confirmRestart = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '确定要重启系统吗？这将中断所有正在运行的任务。',
-      '确认重启',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    ElMessage.info('重启请求已发送，系统将在稍后重启...')
-    // 注意：实际生产中应该有适当的重启机制
-  } catch (error) {
-    // 用户取消操作
-  }
-}
-
-// 获取性能颜色
-const getPerformanceColor = (percentage: number) => {
-  if (percentage < 60) return '#67c23a'
-  if (percentage < 80) return '#e6a23c'
-  return '#f56c6c'
-}
-
-// 获取健康分数颜色
-const getHealthColor = (score: number) => {
-  if (score >= 80) return '#67c23a'
-  if (score >= 60) return '#e6a23c'
-  return '#f56c6c'
-}
-
-// 格式化运行时间
-const formatUptime = (seconds?: number) => {
-  if (!seconds) return 'N/A'
-  
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  
-  return `${days}天 ${hours}小时 ${minutes}分钟`
-}
-
-// 格式化字节数
-const formatBytes = (bytes?: number) => {
-  if (!bytes) return 'N/A'
-  
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  
-  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`
-}
-
 // 初始化
 onMounted(() => {
   fetchAIConfig()
   fetchSystemConfig()
-  refreshPerformance()
 })
 </script>
 
@@ -592,45 +309,6 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.performance-item {
-  margin-bottom: 16px;
-}
-
-.perf-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
-  color: #606266;
-  font-weight: 500;
-}
-
-.service-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.service-item:last-child {
-  border-bottom: none;
-}
-
-.service-label {
-  font-size: 14px;
-  color: #606266;
-}
-
-.system-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-.system-actions-grid .el-button {
-  width: 100%;
 }
 
 .notification-test {
@@ -703,15 +381,6 @@ h4:first-child {
   h4 {
     color: #e5eaf3;
     border-bottom-color: #4c4d4f;
-  }
-  
-  .service-item {
-    border-bottom-color: #4c4d4f;
-  }
-  
-  .perf-label,
-  .service-label {
-    color: #a3a6ad;
   }
 }
 </style>

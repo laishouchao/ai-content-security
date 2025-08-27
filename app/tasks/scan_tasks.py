@@ -12,19 +12,108 @@ from app.websocket.handlers import task_monitor
 from celery_app import celery_app
 
 
+async def _check_task_exists(task_id: str, max_retries: int = 5, retry_delay: float = 1.0) -> bool:
+    """检查任务是否在数据库中存在，支持重试机制"""
+    import asyncio
+    
+    for attempt in range(max_retries):
+        try:
+            # 首先检查Redis中的任务创建标记
+            from app.core.cache_manager import cache_manager
+            await cache_manager.initialize()
+            
+            redis_check = None
+            if cache_manager.redis_client:
+                task_creation_key = f"task_created:{task_id}"
+                redis_check = await cache_manager.redis_client.get(task_creation_key)
+            
+            if redis_check:
+                # Redis中有创建标记，再检查数据库
+                from sqlalchemy import select
+                async with AsyncSessionLocal() as db:
+                    stmt = select(ScanTask.id).where(ScanTask.id == task_id)
+                    result = await db.execute(stmt)
+                    exists = result.scalar_one_or_none() is not None
+                    
+                    if exists:
+                        print(f"任务 {task_id} 验证成功（第{attempt + 1}次尝试）")
+                        await cache_manager.close()
+                        return True
+            else:
+                # Redis中没有标记，直接检查数据库
+                from sqlalchemy import select
+                async with AsyncSessionLocal() as db:
+                    stmt = select(ScanTask.id).where(ScanTask.id == task_id)
+                    result = await db.execute(stmt)
+                    exists = result.scalar_one_or_none() is not None
+                    
+                    if exists:
+                        print(f"任务 {task_id} 在数据库中存在（第{attempt + 1}次尝试）")
+                        await cache_manager.close()
+                        return True
+            
+            await cache_manager.close()
+            
+            # 如果还有重试机会，等待一段时间后重试
+            if attempt < max_retries - 1:
+                print(f"任务 {task_id} 未找到，{retry_delay}秒后进行第{attempt + 2}次尝试...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5  # 指数退避
+        
+        except Exception as e:
+            print(f"检查任务 {task_id} 第{attempt + 1}次尝试失败: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5
+            continue
+    
+    print(f"任务 {task_id} 在 {max_retries} 次尝试后仍未找到")
+    return False
+
+
 @celery_app.task(bind=True, name="scan_domain_task")
 def scan_domain_task(self, task_id: str, user_id: str, target_domain: str, config: Dict[str, Any]):
     """域名扫描后台任务"""
+    print(f"开始执行扫描任务: {target_domain}")
     
     # 在Celery任务中运行异步代码
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
+        # 检查任务是否在数据库中存在
+        task_exists = loop.run_until_complete(_check_task_exists(task_id))
+        if not task_exists:
+            error_msg = f"任务 {task_id} 在数据库中不存在，无法执行"
+            print(f"错误: {error_msg}")
+            
+            # 尝试从Redis中清理这个任务的相关信息
+            try:
+                from app.core.cache_manager import cache_manager
+                loop.run_until_complete(cache_manager.initialize())
+                
+                # 清理当前任务的Redis键
+                if cache_manager.redis_client:
+                    task_key = f"celery-task-meta-{task_id}"
+                    deleted = loop.run_until_complete(cache_manager.redis_client.delete(task_key))
+                    if deleted:
+                        print(f"已清理孤立的任务键: {task_key}")
+                    
+                    loop.run_until_complete(cache_manager.close())
+            except Exception as cleanup_error:
+                print(f"清理孤立任务时出错: {cleanup_error}")
+            
+            # 抛出异常，让Celery知道任务失败
+            raise Exception(error_msg)
+        
+        # 任务存在，执行扫描
         result = loop.run_until_complete(
             _execute_scan_task(task_id, user_id, target_domain, config)
         )
         return result
+    except Exception as e:
+        print(f"扫描任务失败: {e}")
+        raise e
     finally:
         loop.close()
 
@@ -241,20 +330,40 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
             for violation in scan_result.violation_records:
                 db.add(violation)
                 
-                # 发送违规检测通知
-                try:
-                    await task_monitor.notify_violation_detected(
-                        scan_result.task_id,
-                        {
-                            "domain": violation.domain.domain if hasattr(violation, 'domain') else 'unknown',
-                            "violation_type": violation.violation_type,
-                            "risk_level": violation.risk_level,
-                            "confidence_score": violation.confidence_score,
-                            "description": violation.description
-                        }
-                    )
-                except Exception as e:
-                    print(f"发送违规检测通知失败: {e}")
+                # 只有在置信度足够高且有明确违规类型时才发送通知
+                if (violation.confidence_score >= 0.6 and 
+                    violation.violation_type and 
+                    violation.violation_type != '未知违规'):
+                    
+                    try:
+                        # 获取域名信息
+                        from sqlalchemy import select
+                        domain_query = select(ThirdPartyDomain).where(ThirdPartyDomain.id == violation.domain_id)
+                        domain_result = await db.execute(domain_query)
+                        domain_record = domain_result.scalar_one_or_none()
+                        
+                        domain_name = domain_record.domain if domain_record else 'unknown'
+                        
+                        await task_monitor.notify_violation_detected(
+                            scan_result.task_id,
+                            {
+                                "domain": domain_name,
+                                "violation_type": violation.violation_type,
+                                "risk_level": violation.risk_level,
+                                "confidence_score": violation.confidence_score,
+                                "description": violation.description,
+                                "title": violation.title,
+                                "evidence": violation.evidence or [],
+                                "recommendations": violation.recommendations or []
+                            }
+                        )
+                        
+                        print(f"已发送违规检测通知: {domain_name} - {violation.violation_type} (置信度: {violation.confidence_score*100:.1f}%)")
+                        
+                    except Exception as e:
+                        print(f"发送违规检测通知失败: {e}")
+                else:
+                    print(f"违规检测置信度过低或类型不明，跳过通知: {violation.violation_type} (置信度: {violation.confidence_score*100:.1f}%)")
         
         # 更新任务统计信息
         from sqlalchemy import update

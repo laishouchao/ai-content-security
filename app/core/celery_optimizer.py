@@ -216,6 +216,23 @@ def worker_init_handler(sender=None, **kwargs):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(lock_manager.initialize())
+    
+    # 初始化并清理缓存
+    try:
+        from app.core.cache_manager import cache_manager
+        
+        # 初始化缓存管理器
+        loop.run_until_complete(cache_manager.initialize())
+        
+        # 清理孤立的Celery任务
+        orphaned_count = loop.run_until_complete(cache_manager.cleanup_orphaned_celery_tasks())
+        if orphaned_count > 0:
+            logger.info(f"Worker启动时清理了 {orphaned_count} 个孤立的Celery任务")
+        
+        logger.info("Worker缓存清理完成")
+        
+    except Exception as e:
+        logger.error(f"Worker启动时缓存清理失败: {e}")
 
 
 @worker_shutdown.connect
@@ -232,14 +249,15 @@ def worker_shutdown_handler(sender=None, **kwargs):
 @task_prerun.connect
 def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
     """任务执行前处理器"""
-    task_metrics.record_task_start(task_id, task.name)
+    if task_id and task and hasattr(task, 'name'):
+        task_metrics.record_task_start(task_id, task.name)
 
 
 @task_postrun.connect
 def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, 
                         retval=None, state=None, **kwds):
     """任务执行后处理器"""
-    if state == 'SUCCESS':
+    if state == 'SUCCESS' and task_id and task and hasattr(task, 'name'):
         # 计算执行时间
         import time
         duration = getattr(task, '_duration', 0)
@@ -249,7 +267,8 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
 @task_failure.connect
 def task_failure_handler(sender=None, task_id=None, exception=None, traceback=None, einfo=None, **kwds):
     """任务失败处理器"""
-    task_metrics.record_task_failure(task_id, sender.name, str(exception))
+    if task_id and sender and hasattr(sender, 'name'):
+        task_metrics.record_task_failure(task_id, sender.name, str(exception))
 
 
 class CeleryTaskManager:
@@ -259,8 +278,8 @@ class CeleryTaskManager:
     async def get_queue_stats() -> dict:
         """获取队列统计信息"""
         try:
-            from celery import current_app
-            inspect = current_app.control.inspect()
+            # 直接使用celery_app而不是current_app
+            inspect = celery_app.control.inspect()
             
             # 获取队列长度
             queue_lengths = {}

@@ -112,16 +112,57 @@ class TaskMonitorHandler:
     
     async def notify_violation_detected(self, task_id: str, violation_data: Dict[str, Any]):
         """通知检测到违规"""
+        # 验证违规数据的有效性
+        if not violation_data or not violation_data.get('domain'):
+            logger.warning(f"违规通知数据无效，跳过发送: {violation_data}")
+            return
+        
+        # 确保必要的字段存在
+        domain = violation_data.get('domain', 'unknown')
+        violation_type = violation_data.get('violation_type', '未知违规')
+        risk_level = violation_data.get('risk_level', 'low')
+        confidence_score = violation_data.get('confidence_score', 0)
+        description = violation_data.get('description', '检测到潜在违规内容')
+        
+        # 只有在置信度足够高时才发送通知 (至少50%)
+        if confidence_score < 0.5:
+            logger.info(f"违规检测置信度过低 ({confidence_score*100:.1f}%)，跳过通知: {domain}")
+            return
+        
         message = {
             "type": "violation_detected",
             "task_id": task_id,
-            "violation": violation_data,
+            "violation": {
+                "domain": domain,
+                "violation_type": violation_type,
+                "risk_level": risk_level,
+                "confidence_score": confidence_score * 100,  # 转换为百分比
+                "description": description
+            },
             "timestamp": datetime.utcnow().isoformat(),
-            "message": f"检测到{violation_data.get('risk_level', 'unknown')}风险违规"
+            "message": f"在域名 {domain} 检测到{risk_level}风险{violation_type}（置信度: {confidence_score*100:.1f}%）"
         }
         
-        await websocket_manager.broadcast_to_task_subscribers(task_id, message)
-        logger.info(f"违规检测通知已发送: {task_id}")
+        # 获取任务所属用户，发送给用户和任务订阅者
+        try:
+            async for db in get_db():
+                stmt = select(ScanTask).where(ScanTask.id == task_id)
+                result = await db.execute(stmt)
+                task = result.scalar_one_or_none()
+                
+                if task:
+                    # 发送给任务所属用户
+                    await websocket_manager.broadcast_to_user(str(task.user_id), message)
+                    
+                # 发送给任务订阅者
+                await websocket_manager.broadcast_to_task_subscribers(task_id, message)
+                
+                logger.info(f"违规检测通知已发送: {task_id} - {domain} ({violation_type}, {risk_level}风险, {confidence_score*100:.1f}%置信度)")
+                
+        except Exception as e:
+            logger.error(f"发送违规检测通知失败: {e}")
+            # 即使获取用户失败，也尝试发送给任务订阅者
+            await websocket_manager.broadcast_to_task_subscribers(task_id, message)
     
     async def send_task_logs(self, task_id: str, logs: List[Dict[str, Any]]):
         """发送任务日志"""

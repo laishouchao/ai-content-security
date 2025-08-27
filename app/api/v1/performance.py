@@ -124,12 +124,12 @@ class SystemPerformanceService:
             net_io = psutil.net_io_counters()
             
             return {
-                'cpu_percent': cpu_percent,
+                'cpu_percent': round(cpu_percent, 1),
                 'disk_usage': {
                     'total': disk_usage.total,
                     'used': disk_usage.used,
                     'free': disk_usage.free,
-                    'percent': (disk_usage.used / disk_usage.total) * 100
+                    'percent': round((disk_usage.used / disk_usage.total) * 100, 1)
                 },
                 'network': {
                     'bytes_sent': net_io.bytes_sent,
@@ -463,4 +463,65 @@ async def get_system_alerts(
         }
     except Exception as e:
         logger.error(f"获取系统告警失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/metrics", summary="获取性能指标时间序列数据")
+async def get_performance_metrics(
+    range: str = "1h",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取性能指标的时间序列数据用于图表显示"""
+    try:
+        # 生成模拟的时间序列数据
+        from datetime import datetime, timedelta
+        import random
+        
+        # 根据时间范围确定时间间隔和数据点数量
+        if range == "1h":
+            interval_minutes = 5
+            points = 12
+        elif range == "6h":
+            interval_minutes = 30
+            points = 12
+        elif range == "24h":
+            interval_minutes = 120
+            points = 12
+        else:  # 7d
+            interval_minutes = 6 * 60  # 6小时
+            points = 28
+        
+        # 生成时间戳
+        now = datetime.utcnow()
+        timestamps = []
+        cpu_data = []
+        memory_data = []
+        disk_data = []
+        
+        for i in range(points):
+            time_point = now - timedelta(minutes=interval_minutes * (points - 1 - i))
+            timestamps.append(time_point.strftime('%H:%M'))
+            
+            # 生成模拟数据（在实际生产中应该从数据库或监控系统获取）
+            base_cpu = 25 + random.random() * 30  # 25-55%
+            base_memory = 40 + random.random() * 35  # 40-75%
+            base_disk = 60 + random.random() * 20   # 60-80%
+            
+            cpu_data.append(round(base_cpu, 1))
+            memory_data.append(round(base_memory, 1))
+            disk_data.append(round(base_disk, 1))
+        
+        return {
+            'success': True,
+            'data': {
+                'timestamps': timestamps,
+                'cpu': cpu_data,
+                'memory': memory_data,
+                'disk': disk_data,
+                'range': range
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取性能指标失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -169,33 +169,19 @@ export const useWebSocketStore = defineStore('websocket', () => {
         clearConnectTimeout()
         lastError.value = ''
         connectedAt.value = new Date().toISOString()
-        if (originalOnOpen) originalOnOpen.call(ws.value, event)
+        if (originalOnOpen && ws.value) originalOnOpen.call(ws.value, event)
       }
       
       ws.value.onerror = (event) => {
         clearConnectTimeout()
         lastError.value = 'WebSocket连接错误'
-        if (originalOnError) originalOnError.call(ws.value, event)
-        
-        // 在开发环境下，连接失败时回退到模拟模式
-        if (import.meta.env.DEV && status.value === WebSocketStatus.ERROR) {
-          console.log('🔄 WebSocket连接失败，回退到模拟模式')
-          setTimeout(() => {
-            simulateConnection()
-          }, 1000)
-        }
+        if (originalOnError && ws.value) originalOnError.call(ws.value, event)
       }
       
     } catch (error) {
       console.error('WebSocket连接初始化失败:', error)
       lastError.value = `连接初始化失败: ${error}`
       status.value = WebSocketStatus.ERROR
-      
-      // 在开发环境下回退到模拟连接
-      if (import.meta.env.DEV) {
-        console.log('🔄 初始化失败，回退到模拟模式')
-        simulateConnection()
-      }
     }
   }
 
@@ -245,51 +231,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
       })
       status.value = WebSocketStatus.ERROR
     }
-  }
-
-  // 模拟连接（开发环境）
-  const simulateConnection = () => {
-    setTimeout(() => {
-      status.value = WebSocketStatus.CONNECTED
-      console.log('✅ 模拟WebSocket连接成功')
-      
-      // 模拟定期发送消息
-      setInterval(() => {
-        if (status.value === WebSocketStatus.CONNECTED) {
-          simulateMessage()
-        }
-      }, 10000) // 每10秒发送一条模拟消息
-    }, 1000)
-  }
-
-  // 模拟消息
-  const simulateMessage = () => {
-    const mockMessages = [
-      {
-        type: 'task_progress',
-        task_id: '1',
-        progress: Math.floor(Math.random() * 100),
-        stage: '子域名发现',
-        message: '正在发现子域名...',
-        timestamp: new Date().toISOString()
-      },
-      {
-        type: 'violation_detected',
-        task_id: '2',
-        violation: {
-          domain: 'example.com',
-          violation_type: '敏感信息泄露',
-          risk_level: '高',
-          confidence_score: 85,
-          description: '检测到可能的API密钥泄露'
-        },
-        message: '发现新的违规内容',
-        timestamp: new Date().toISOString()
-      }
-    ]
-    
-    const randomMessage = mockMessages[Math.floor(Math.random() * mockMessages.length)]
-    handleMessage(randomMessage as WebSocketMessage)
   }
 
   // 处理消息

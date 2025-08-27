@@ -63,18 +63,19 @@ class MemoryMonitor:
                 'process_memory': {
                     'rss': memory_info.rss,  # 物理内存
                     'vms': memory_info.vms,  # 虚拟内存
-                    'percent': memory_percent,
-                    'rss_mb': memory_info.rss / 1024 / 1024,
-                    'vms_mb': memory_info.vms / 1024 / 1024,
+                    'percent': round(memory_percent, 1),
+                    'rss_mb': round(memory_info.rss / 1024 / 1024, 1),
+                    'vms_mb': round(memory_info.vms / 1024 / 1024, 1),
                 },
                 'system_memory': {
                     'total': system_memory.total,
                     'available': system_memory.available,
-                    'percent': system_memory.percent,
+                    'percent': round(system_memory.percent, 1),
                     'used': system_memory.used,
                     'free': system_memory.free,
-                    'total_gb': system_memory.total / 1024 / 1024 / 1024,
-                    'available_gb': system_memory.available / 1024 / 1024 / 1024,
+                    'total_gb': round(system_memory.total / 1024 / 1024 / 1024, 2),
+                    'available_gb': round(system_memory.available / 1024 / 1024 / 1024, 2),
+                    'used_gb': round(system_memory.used / 1024 / 1024 / 1024, 2),
                 },
                 'gc_stats': {
                     'collections': gc.get_stats(),

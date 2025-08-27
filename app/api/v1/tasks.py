@@ -71,26 +71,63 @@ async def create_scan_task(
             created_at=datetime.utcnow()
         )
         
-        db.add(task)
-        await db.commit()
-        await db.refresh(task)
+        # 使用Redis分布式锁确保任务创建的原子性
+        from app.core.cache_manager import cache_manager
+        from app.core.redis_lock import lock_manager
         
-        # 发送任务创建通知
-        await task_monitor.notify_task_created(task_id, str(current_user.id), target_domain)
+        # 初始化缓存管理器和锁管理器
+        await cache_manager.initialize()
+        await lock_manager.initialize()
         
-        # 启动异步任务
-        from celery_app import celery_app
-        celery_app.send_task("scan_domain_task", args=[task_id, str(current_user.id), target_domain, config])
+        lock_key = f"task_creation_lock:{task_id}"
         
-        logger.info(f"扫描任务已创建: {task_id} - {target_domain}")
-        
-        return {
-            "success": True,
-            "task_id": task_id,
-            "target_domain": target_domain,
-            "status": task.status,
-            "message": "扫描任务已创建并开始执行"
-        }
+        try:
+            # 获取分布式锁
+            async with lock_manager.lock(lock_key, timeout=30, expire_time=60):
+                # 添加任务到数据库
+                db.add(task)
+                await db.commit()
+                await db.refresh(task)
+                
+                # 在Redis中设置任务创建标记，供Celery任务检查
+                if cache_manager.redis_client:
+                    task_creation_key = f"task_created:{task_id}"
+                    await cache_manager.redis_client.setex(task_creation_key, 300, "created")  # 5分钟过期
+                    logger.info(f"任务已创建并标记: {task_id} - {target_domain}")
+                else:
+                    logger.warning("缓存管理器未初始化，跳过Redis标记")
+                
+            # 发送任务创建通知
+            await task_monitor.notify_task_created(task_id, str(current_user.id), target_domain)
+            
+            # 启动异步任务（使用延迟执行避免竞态条件）
+            from celery_app import celery_app
+            celery_app.send_task(
+                "scan_domain_task", 
+                args=[task_id, str(current_user.id), target_domain, config],
+                countdown=2  # 延迟2秒执行，确保数据库事务完全提交
+            )
+            
+            logger.info(f"扫描任务已创建: {task_id} - {target_domain}")
+            
+            return {
+                "success": True,
+                "task_id": task_id,
+                "target_domain": target_domain,
+                "status": task.status,
+                "message": "扫描任务已创建并开始执行"
+            }
+            
+        except Exception as lock_error:
+            await db.rollback()
+            logger.error(f"获取任务创建锁失败: {lock_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="任务创建失败，请稍后重试"
+            )
+        finally:
+            await cache_manager.close()
+            await lock_manager.close()
         
     except ValidationError as e:
         raise HTTPException(
@@ -505,14 +542,38 @@ async def retry_scan_task(
         
         await db.commit()
         
-        # 发送任务创建通知
-        await task_monitor.notify_task_created(task_id, str(current_user.id), task.target_domain)
+        # 使用Redis分布式锁确保任务重启的原子性
+        from app.core.cache_manager import cache_manager
+        from app.core.redis_lock import lock_manager
         
-        # 启动异步任务
-        from celery_app import celery_app
-        celery_app.send_task("scan_domain_task", args=[task_id, str(current_user.id), task.target_domain, task.config])
+        await cache_manager.initialize()
+        await lock_manager.initialize()
         
-        logger.info(f"扫描任务已重试: {task_id} - {task.target_domain}")
+        lock_key = f"task_retry_lock:{task_id}"
+        
+        try:
+            async with lock_manager.lock(lock_key, timeout=30, expire_time=60):
+                # 在Redis中设置任务创建标记
+                if cache_manager.redis_client:
+                    task_creation_key = f"task_created:{task_id}"
+                    await cache_manager.redis_client.setex(task_creation_key, 300, "recreated")  # 5分钟过期
+                
+                # 发送任务创建通知
+                await task_monitor.notify_task_created(task_id, str(current_user.id), str(task.target_domain))
+                
+                # 启动异步任务（使用延迟执行）
+                from celery_app import celery_app
+                celery_app.send_task(
+                    "scan_domain_task", 
+                    args=[task_id, str(current_user.id), task.target_domain, task.config],
+                    countdown=2  # 延迟2秒执行
+                )
+                
+                logger.info(f"扫描任务已重试: {task_id} - {task.target_domain}")
+            
+        finally:
+            await cache_manager.close()
+            await lock_manager.close()
         
         return {
             "success": True,

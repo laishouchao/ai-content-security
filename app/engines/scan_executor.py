@@ -387,9 +387,30 @@ class ScanTaskExecutor:
         try:
             self.logger.info("开始内容抓取阶段")
             
-            # 为每个第三方域名抓取内容
             all_content_results = []
             
+            # 1. 首先为子域名的主页抓取内容和截图
+            self.logger.info(f"开始抓取 {len(result.subdomains)} 个子域名的主页")
+            for subdomain in result.subdomains:
+                if self.is_cancelled:
+                    break
+                
+                # 只抓取可访问的子域名
+                if subdomain.is_accessible:
+                    urls_to_capture = [
+                        f"https://{subdomain.subdomain}",
+                        f"http://{subdomain.subdomain}"
+                    ]
+                    
+                    # 执行抓取
+                    content_results = await self.capture_engine.capture_domain_content(
+                        subdomain.subdomain, urls_to_capture, config
+                    )
+                    
+                    all_content_results.extend(content_results)
+            
+            # 2. 然后为每个第三方域名抓取内容
+            self.logger.info(f"开始抓取 {len(result.third_party_domains)} 个第三方域名")
             for third_party_domain in result.third_party_domains:
                 if self.is_cancelled:
                     break
@@ -458,7 +479,11 @@ class ScanTaskExecutor:
                 self.logger.info("没有需要进行AI分析的域名")
                 return
             
-            self.logger.info(f"开始分析 {len(domains_to_analyze)} 个第三方域名")
+            # 统计子域名和第三方域名数量
+            subdomain_count = sum(1 for d in domains_to_analyze if hasattr(d, 'domain_type') and d.domain_type == 'subdomain')
+            third_party_count = len(domains_to_analyze) - subdomain_count
+            
+            self.logger.info(f"开始分析 {len(domains_to_analyze)} 个域名（子域名: {subdomain_count}, 第三方域名: {third_party_count}）")
             
             # 执行AI分析
             violations = await self.ai_engine.analyze_domains(domains_to_analyze)
@@ -499,26 +524,28 @@ class ScanTaskExecutor:
             return None
     
     async def _prepare_domains_for_analysis(self, result: ScanExecutionResult):
-        """准备需要分析的域名数据"""
+        """准备需要分析的域名数据（包括子域名和第三方域名）"""
         try:
             from app.core.database import AsyncSessionLocal
-            from app.models.task import ThirdPartyDomain
+            from app.models.task import ThirdPartyDomain, SubdomainRecord
             from sqlalchemy import select
             from datetime import datetime, timedelta
             
             async with AsyncSessionLocal() as db:
-                # 查询当前任务的第三方域名记录
+                domains_to_analyze = []
+                
+                # 1. 处理第三方域名
                 stmt = select(ThirdPartyDomain).where(
                     ThirdPartyDomain.task_id == self.task_id,
                     ThirdPartyDomain.is_analyzed == False  # 只分析未分析的
                 )
                 db_result = await db.execute(stmt)
-                domains = db_result.scalars().all()
+                third_party_domains = db_result.scalars().all()
                 
-                # 检查是否有缓存的分析结果
-                domains_to_analyze = []
-                for domain in domains:
-                    # 检查是否有7天内的缓存结果
+                self.logger.info(f"找到 {len(third_party_domains)} 个未分析的第三方域名")
+                
+                for domain in third_party_domains:
+                    # 检查是否有缓存的分析结果
                     if domain.cached_analysis_result is not None:
                         try:
                             # 使用缓存结果
@@ -529,11 +556,6 @@ class ScanTaskExecutor:
                             domain.is_analyzed = True  # type: ignore
                             domain.analyzed_at = datetime.utcnow()  # type: ignore
                             
-                            # 如果缓存结果中有违规记录，则创建违规记录
-                            if cached_result.get('has_violation', False):
-                                # 这里可以创建违规记录，但为了简化，我们只标记为已分析
-                                pass
-                        
                         except Exception as e:
                             self.logger.warning(f"使用缓存结果失败: {e}")
                             # 如果缓存结果有问题，仍然需要分析
@@ -544,10 +566,62 @@ class ScanTaskExecutor:
                         if domain.screenshot_path is not None and Path(str(domain.screenshot_path)).exists():
                             domains_to_analyze.append(domain)
                         else:
-                            self.logger.warning(f"域名 {domain.domain} 没有有效的截图文件，跳过AI分析")
+                            self.logger.warning(f"第三方域名 {domain.domain} 没有有效的截图文件，跳过AI分析")
+                
+                # 2. 处理子域名（新增功能）
+                subdomain_stmt = select(SubdomainRecord).where(
+                    SubdomainRecord.task_id == self.task_id
+                )
+                subdomain_result = await db.execute(subdomain_stmt)
+                subdomain_records = subdomain_result.scalars().all()
+                
+                self.logger.info(f"找到 {len(subdomain_records)} 个子域名记录")
+                
+                # 为子域名创建类似第三方域名的结构，以便AI分析
+                for subdomain_record in subdomain_records:
+                    # 只分析可访问的子域名
+                    if subdomain_record.is_accessible:
+                        # 查找对应的截图文件
+                        screenshot_path = None
+                        self.logger.debug(f"查找子域名 {subdomain_record.subdomain} 的截图文件...")
+                        
+                        for content_result in result.content_results:
+                            self.logger.debug(f"检查内容结果: URL={content_result.url}, 截图路径={content_result.screenshot_path}")
+                            if subdomain_record.subdomain in content_result.url:
+                                screenshot_path = content_result.screenshot_path
+                                self.logger.debug(f"找到匹配的截图: {screenshot_path}")
+                                break
+                        
+                        if screenshot_path:
+                            # 验证截图文件是否存在
+                            screenshot_file_exists = Path(screenshot_path).exists()
+                            self.logger.debug(f"子域名 {subdomain_record.subdomain} 截图路径: {screenshot_path}, 文件存在: {screenshot_file_exists}")
+                            
+                            if screenshot_file_exists:
+                                # 创建一个临时的第三方域名对象用于AI分析
+                                subdomain_for_analysis = type('SubdomainForAnalysis', (), {
+                                    'id': subdomain_record.id,
+                                    'domain': subdomain_record.subdomain,
+                                    'screenshot_path': screenshot_path,
+                                    'page_title': subdomain_record.page_title or f"{subdomain_record.subdomain} - 子域名主页",
+                                    'page_description': f"目标域名的子域名: {subdomain_record.subdomain}",
+                                    'is_analyzed': False,
+                                    'domain_type': 'subdomain',  # 标记为子域名类型
+                                    'cached_analysis_result': None
+                                })()
+                                
+                                domains_to_analyze.append(subdomain_for_analysis)
+                                self.logger.info(f"子域名 {subdomain_record.subdomain} 已添加到AI分析队列")
+                            else:
+                                self.logger.warning(f"子域名 {subdomain_record.subdomain} 截图文件不存在: {screenshot_path}")
+                        else:
+                            self.logger.warning(f"子域名 {subdomain_record.subdomain} 没有找到匹配的截图文件")
                 
                 await db.commit()
+                
+                self.logger.info(f"总共准备了 {len(domains_to_analyze)} 个域名进行AI分析（包括第三方域名和子域名）")
                 return domains_to_analyze
+                
         except Exception as e:
             self.logger.error(f"准备分析域名数据失败: {e}")
             return []

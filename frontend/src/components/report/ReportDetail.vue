@@ -63,9 +63,7 @@
         <el-table :data="violations" v-loading="violationsLoading">
           <el-table-column prop="domain" label="域名" min-width="200">
             <template #default="{ row }">
-              <el-link type="primary" :href="`https://${row.domain}`" target="_blank">
-                {{ row.domain }}
-              </el-link>
+              <el-text class="domain-id-text">域名ID: {{ row.domain_id }}</el-text>
             </template>
           </el-table-column>
 
@@ -83,19 +81,19 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="confidence" label="置信度" width="100">
+          <el-table-column prop="confidence_score" label="置信度" width="100">
             <template #default="{ row }">
               <el-progress 
-                :percentage="Math.round(row.confidence * 100)" 
+                :percentage="Math.round(row.confidence_score * 100)" 
                 :stroke-width="6"
-                :color="getConfidenceColor(row.confidence)"
+                :color="getConfidenceColor(row.confidence_score)"
               />
             </template>
           </el-table-column>
 
-          <el-table-column prop="reasoning" label="判断理由" min-width="300">
+          <el-table-column prop="description" label="描述" min-width="300">
             <template #default="{ row }">
-              <el-text class="reasoning-text">{{ row.reasoning }}</el-text>
+              <el-text class="reasoning-text">{{ row.description }}</el-text>
             </template>
           </el-table-column>
 
@@ -115,9 +113,9 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="created_at" label="发现时间" width="150">
+          <el-table-column prop="detected_at" label="发现时间" width="150">
             <template #default="{ row }">
-              {{ formatTime(row.created_at) }}
+              {{ formatTime(row.detected_at) }}
             </template>
           </el-table-column>
 
@@ -129,14 +127,6 @@
                 @click="viewViolationDetail(row)"
               >
                 查看详情
-              </el-button>
-              <el-button 
-                type="text" 
-                size="small"
-                v-if="row.screenshot_url"
-                @click="viewScreenshot(row)"
-              >
-                查看截图
               </el-button>
             </template>
           </el-table-column>
@@ -166,10 +156,8 @@
     >
       <div v-if="selectedViolation">
         <el-descriptions :column="1" border>
-          <el-descriptions-item label="域名">
-            <el-link type="primary" :href="`https://${selectedViolation.domain}`" target="_blank">
-              {{ selectedViolation.domain }}
-            </el-link>
+          <el-descriptions-item label="域名ID">
+            <el-text>{{ selectedViolation.domain_id }}</el-text>
           </el-descriptions-item>
           <el-descriptions-item label="违规类型">
             <el-tag>{{ getViolationTypeText(selectedViolation.violation_type) }}</el-tag>
@@ -180,10 +168,10 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="置信度">
-            {{ Math.round(selectedViolation.confidence * 100) }}%
+            {{ Math.round(selectedViolation.confidence_score * 100) }}%
           </el-descriptions-item>
-          <el-descriptions-item label="判断理由">
-            {{ selectedViolation.reasoning }}
+          <el-descriptions-item label="描述">
+            {{ selectedViolation.description }}
           </el-descriptions-item>
           <el-descriptions-item label="证据列表">
             <el-tag 
@@ -196,28 +184,14 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="发现时间">
-            {{ formatTime(selectedViolation.created_at) }}
+            {{ formatTime(selectedViolation.detected_at) }}
           </el-descriptions-item>
         </el-descriptions>
       </div>
     </el-dialog>
 
     <!-- 截图查看对话框 -->
-    <el-dialog
-      v-model="screenshotVisible"
-      title="页面截图"
-      width="80%"
-      :close-on-click-modal="false"
-    >
-      <div v-if="selectedViolation?.screenshot_url" class="screenshot-container">
-        <el-image 
-          :src="selectedViolation.screenshot_url"
-          :alt="`${selectedViolation.domain} 页面截图`"
-          fit="contain"
-          class="screenshot-image"
-        />
-      </div>
-    </el-dialog>
+    <!-- 注意：当前违规记录类型中不包含screenshot_url属性，此功能暂时禁用 -->
   </div>
 </template>
 
@@ -247,7 +221,6 @@ const emit = defineEmits<Emits>()
 const loading = ref(false)
 const violationsLoading = ref(false)
 const violationDetailVisible = ref(false)
-const screenshotVisible = ref(false)
 
 const reportData = ref<ScanReport | null>(null)
 const violations = ref<ViolationRecord[]>([])
@@ -380,11 +353,6 @@ const handleViolationCurrentChange = (page: number) => {
 const viewViolationDetail = (violation: ViolationRecord) => {
   selectedViolation.value = violation
   violationDetailVisible.value = true
-}
-
-const viewScreenshot = (violation: ViolationRecord) => {
-  selectedViolation.value = violation
-  screenshotVisible.value = true
 }
 
 // 监听 taskId 变化

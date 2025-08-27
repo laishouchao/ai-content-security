@@ -15,15 +15,15 @@
       <el-divider content-position="left">访问控制</el-divider>
       
       <el-form-item label="启用IP白名单">
-        <el-switch v-model="config.ip_whitelist_enabled" />
+        <el-switch v-model="config.enable_ip_whitelist" />
       </el-form-item>
 
-      <el-form-item label="允许的IP地址" v-if="config.ip_whitelist_enabled">
+      <el-form-item label="允许的IP地址" v-if="config.enable_ip_whitelist">
         <el-tag
-          v-for="ip in config.allowed_ips"
+          v-for="ip in config.ip_whitelist"
           :key="ip"
           closable
-          @close="removeIP(ip)"
+          @close="removeIpFromWhitelist(ip)"
           class="mr-2 mb-2"
         >
           {{ ip }}
@@ -47,16 +47,14 @@
       <el-divider content-position="left">密码策略</el-divider>
 
       <el-form-item label="最小密码长度">
-        <el-input-number v-model="config.min_password_length" :min="6" :max="20" />
+        <el-input-number v-model="config.password_min_length" :min="6" :max="20" />
       </el-form-item>
 
       <el-form-item label="密码复杂度要求">
-        <el-checkbox-group v-model="config.password_requirements">
-          <el-checkbox label="uppercase">包含大写字母</el-checkbox>
-          <el-checkbox label="lowercase">包含小写字母</el-checkbox>
-          <el-checkbox label="numbers">包含数字</el-checkbox>
-          <el-checkbox label="special">包含特殊字符</el-checkbox>
-        </el-checkbox-group>
+        <el-checkbox v-model="config.password_require_uppercase">包含大写字母</el-checkbox>
+        <el-checkbox v-model="config.password_require_lowercase">包含小写字母</el-checkbox>
+        <el-checkbox v-model="config.password_require_numbers">包含数字</el-checkbox>
+        <el-checkbox v-model="config.password_require_symbols">包含特殊字符</el-checkbox>
       </el-form-item>
 
       <el-form-item label="密码有效期(天)">
@@ -68,19 +66,19 @@
       <el-divider content-position="left">登录安全</el-divider>
 
       <el-form-item label="最大登录尝试次数">
-        <el-input-number v-model="config.max_login_attempts" :min="3" :max="10" />
+        <el-input-number v-model="config.max_concurrent_sessions" :min="1" :max="10" />
       </el-form-item>
 
       <el-form-item label="账户锁定时间(分钟)">
-        <el-input-number v-model="config.lockout_duration_minutes" :min="5" :max="1440" />
+        <el-input-number v-model="config.session_timeout_minutes" :min="5" :max="1440" />
       </el-form-item>
 
-      <el-form-item label="会话超时时间(小时)">
-        <el-input-number v-model="config.session_timeout_hours" :min="1" :max="24" />
+      <el-form-item label="启用会话绑定">
+        <el-switch v-model="config.enable_session_binding" />
       </el-form-item>
 
       <el-form-item label="启用双因素认证">
-        <el-switch v-model="config.two_factor_enabled" />
+        <el-switch v-model="config.enable_2fa" />
       </el-form-item>
 
       <!-- API安全 -->
@@ -88,7 +86,7 @@
 
       <el-form-item label="API速率限制">
         <el-input-number 
-          v-model="config.api_rate_limit" 
+          v-model="config.rate_limit_requests_per_minute" 
           :min="10" 
           :max="1000"
           controls-position="right"
@@ -101,30 +99,26 @@
       </el-form-item>
 
       <el-form-item label="启用API日志记录">
-        <el-switch v-model="config.api_logging_enabled" />
+        <el-switch v-model="config.enable_audit_log" />
       </el-form-item>
 
       <!-- 数据保护 -->
       <el-divider content-position="left">数据保护</el-divider>
 
       <el-form-item label="敏感数据加密">
-        <el-switch v-model="config.data_encryption_enabled" />
+        <el-switch v-model="config.enable_request_encryption" />
       </el-form-item>
 
       <el-form-item label="数据保留期(天)">
-        <el-input-number v-model="config.data_retention_days" :min="30" :max="3650" />
+        <el-input-number v-model="config.log_retention_days" :min="30" :max="3650" />
       </el-form-item>
 
       <el-form-item label="自动备份">
-        <el-switch v-model="config.auto_backup_enabled" />
+        <el-switch v-model="config.enable_virus_scan" />
       </el-form-item>
 
-      <el-form-item label="备份频率" v-if="config.auto_backup_enabled">
-        <el-select v-model="config.backup_frequency">
-          <el-option label="每日" value="daily" />
-          <el-option label="每周" value="weekly" />
-          <el-option label="每月" value="monthly" />
-        </el-select>
+      <el-form-item label="文件大小限制(MB)">
+        <el-input-number v-model="config.max_file_size_mb" :min="1" :max="100" />
       </el-form-item>
 
       <!-- 保存按钮 -->
@@ -132,7 +126,7 @@
         <el-button type="primary" @click="saveConfig" :loading="saving">
           保存配置
         </el-button>
-        <el-button @click="resetToDefaults" :loading="resetting">
+        <el-button @click="resetConfig">
           恢复默认
         </el-button>
       </el-form-item>
@@ -143,13 +137,16 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Shield } from '@element-plus/icons-vue'
+import { Lock } from '@element-plus/icons-vue'
 import { securityAPI, type SecurityConfig } from '@/api/security'
 
 // 响应式数据
 const loading = ref(false)
 const saving = ref(false)
 const checkingStatus = ref(false)
+const ipInputVisible = ref(false)
+const ipInputValue = ref('')
+const ipInputRef = ref(null)
 
 // 安全配置数据
 const config = reactive<SecurityConfig>({
@@ -190,8 +187,25 @@ const config = reactive<SecurityConfig>({
 // 安全状态数据
 const securityStatus = ref<any>(null)
 
-// 新IP地址输入
-const newIpAddress = ref('')
+// 显示IP输入框
+const showIPInput = () => {
+  ipInputVisible.value = true
+}
+
+// 处理IP输入确认
+const handleIPInputConfirm = () => {
+  if (ipInputValue.value && !config.ip_whitelist.includes(ipInputValue.value)) {
+    // 简单的IP地址格式验证
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    if (ipRegex.test(ipInputValue.value) || ipInputValue.value.includes('/')) {
+      config.ip_whitelist.push(ipInputValue.value)
+      ipInputValue.value = ''
+      ipInputVisible.value = false
+    } else {
+      ElMessage.error('请输入有效的IP地址或CIDR')
+    }
+  }
+}
 
 // 加载安全配置
 const loadConfig = async () => {
@@ -267,16 +281,7 @@ const checkSecurityStatus = async () => {
 
 // 添加IP地址到白名单
 const addIpToWhitelist = () => {
-  if (newIpAddress.value && !config.ip_whitelist.includes(newIpAddress.value)) {
-    // 简单的IP地址格式验证
-    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-    if (ipRegex.test(newIpAddress.value) || newIpAddress.value.includes('/')) {
-      config.ip_whitelist.push(newIpAddress.value)
-      newIpAddress.value = ''
-    } else {
-      ElMessage.error('请输入有效的IP地址或CIDR')
-    }
-  }
+  showIPInput()
 }
 
 // 从白名单中移除IP地址

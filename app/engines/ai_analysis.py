@@ -379,7 +379,7 @@ class AIAnalysisEngine:
                 ai_response = await client.analyze_content(prompt, image_data)
             
             # 解析AI响应
-            result = await self._parse_ai_response(ai_response, result)
+            result = await self._parse_ai_response(ai_response, result, domain)
             result.analysis_duration = time.time() - start_time
             
         except Exception as e:
@@ -393,20 +393,39 @@ class AIAnalysisEngine:
         """构建AI分析提示词"""
         custom_template_value = str(self.ai_config.custom_prompt_template) if self.ai_config.custom_prompt_template is not None else ""
         template = custom_template_value if custom_template_value != "" else """
-分析域名：{domain}
+作为一个专业的内容安全分析师，请仔细分析以下域名的页面内容：
+
+域名：{domain}
 发现页面：{found_on_url}
 域名类型：{domain_type}
 页面标题：{page_title}
+页面描述：{page_description}
 
-请仔细分析该域名的页面截图和以下信息，判断是否存在违规内容。
+**分析要求**：
+1. 仅当明确检测到违法或有害内容时才标记为违规
+2. 正常的技术服务（CDN、广告、统计分析）不应被标记为违规
+3. 仅根据页面实际内容进行判断，不要根据域名本身进行猜测
+4. 置信度必须基于明确的证据，不确定的情况下请设置低置信度
 
-域名描述：{page_description}
+**重点关注的违规类型**：
+- 非法内容（色情、暴力、赌博等）
+- 恶意软件或欺诈页面
+- 敏感信息泄露（API密钥、密码等）
+- 侵犯版权的内容
+- 虚假信息或误导性内容
 
-注意事项：
-1. 这是一个第三方域名，需要特别关注是否存在恶意内容
-2. 请结合页面截图进行综合判断
-3. 对于CDN、广告、分析等正常技术服务，除非明确存在违规内容，否则不应标记为违规
-4. 重点关注页面的实际内容，而非技术实现
+请返回 JSON 格式的分析结果：
+{{
+  "has_violation": false,  // 仅在明确检测到违规时设为 true
+  "violation_types": [],   // 违规类型列表
+  "confidence_score": 0.0, // 0.0-1.0，仅在有确凿证据时设置高值
+  "risk_level": "low",     // low/medium/high/critical
+  "title": "",            // 简短标题
+  "description": "",      // 详细描述
+  "content_snippet": "",  // 相关内容片段
+  "evidence": [],          // 证据列表
+  "recommendations": []   // 建议措施
+}}
 """
         
         return template.format(
@@ -426,7 +445,7 @@ class AIAnalysisEngine:
         except Exception as e:
             raise ValueError(f"读取截图文件失败: {e}")
     
-    async def _parse_ai_response(self, ai_response: Dict[str, Any], result: AIAnalysisResult) -> AIAnalysisResult:
+    async def _parse_ai_response(self, ai_response: Dict[str, Any], result: AIAnalysisResult, domain: ThirdPartyDomain) -> AIAnalysisResult:
         """解析AI响应"""
         try:
             # 保存原始响应
@@ -464,16 +483,32 @@ class AIAnalysisEngine:
             risk_level_str = analysis_result.get('risk_level', 'low').lower()
             result.risk_level = self._map_risk_level(risk_level_str)  # type: ignore
             
-            # 验证数据有效性
+            # 验证数据有效性和置信度
             if result.has_violation:
+                # 只有在置信度足够高时才认为是真正的违规
+                if result.confidence_score < 0.6:  # 60%以下的置信度不认为是违规
+                    self.logger.info(f"域名 {domain.domain} AI分析置信度过低 ({result.confidence_score*100:.1f}%)，不认为是违规")
+                    result.has_violation = False
+                    result.violation_types = []
+                    result.risk_level = RiskLevel.LOW
+                
+                # 检查是否有明确的违规类型
                 if not result.violation_types:
                     result.violation_types = ['未知违规']
                 if not result.description:
                     result.description = 'AI检测到潜在违规内容'
+                
+                # 设置默认置信度下限
                 if result.confidence_score < 0.1:
-                    result.confidence_score = 0.5  # 设置默认置信度
+                    result.confidence_score = 0.6  # 设置默认置信度
+                
                 if not result.title:
-                    result.title = f"{result.violation_types[0]} - {result.risk_level}"
+                    result.title = f"{result.violation_types[0]} - {result.risk_level}风险"
+            else:
+                # 确保非违规情况下的数据一致性
+                result.violation_types = []
+                result.confidence_score = 0.0
+                result.risk_level = RiskLevel.LOW
             
         except Exception as e:
             self.logger.error(f"解析AI响应失败: {e}")

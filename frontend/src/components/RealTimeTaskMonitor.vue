@@ -152,6 +152,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { useTaskStore } from '@/stores/task'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useRouter } from 'vue-router'
+import { TaskStatus } from '@/types/api'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
 
@@ -175,7 +176,7 @@ const refreshTasks = async () => {
   try {
     loading.value = true
     await taskStore.fetchTasks({
-      status: 'running',
+      status: TaskStatus.RUNNING,
       limit: 50
     })
     

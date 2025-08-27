@@ -2,7 +2,7 @@
  * 域名白名单/黑名单管理API
  */
 
-import { http } from './http'
+import http from './http'
 
 // 类型定义
 export interface DomainList {

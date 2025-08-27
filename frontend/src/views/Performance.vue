@@ -40,7 +40,7 @@
               <el-icon><Cpu /></el-icon>
             </div>
             <div class="metric-info">
-              <div class="metric-value">{{ performanceData.system_health?.cpu_percent || 0 }}%</div>
+              <div class="metric-value">{{ formatPercentage(performanceData.system_health?.cpu_percent) }}%</div>
               <div class="metric-label">CPU使用率</div>
             </div>
           </div>
@@ -53,7 +53,8 @@
               <el-icon><MagicStick /></el-icon>
             </div>
             <div class="metric-info">
-              <div class="metric-value">{{ performanceData.memory_stats?.memory_info?.process_memory?.percent || 0 }}%</div>
+              <div class="metric-value">{{ formatPercentage(performanceData.memory_stats?.memory_info?.system_memory?.percent) }}%</div>
+              <div class="metric-detail">{{ getMemoryUsageDetail(performanceData.memory_stats) }}</div>
               <div class="metric-label">内存使用率</div>
             </div>
           </div>
@@ -66,7 +67,8 @@
               <el-icon><FolderOpened /></el-icon>
             </div>
             <div class="metric-info">
-              <div class="metric-value">{{ performanceData.system_health?.disk_usage?.percent || 0 }}%</div>
+              <div class="metric-value">{{ formatPercentage(performanceData.system_health?.disk_usage?.percent) }}%</div>
+              <div class="metric-detail">{{ getDiskUsageDetail(performanceData.system_health) }}</div>
               <div class="metric-label">磁盘使用率</div>
             </div>
           </div>
@@ -92,7 +94,7 @@
             <div class="metric-item">
               <div class="metric-header">
                 <span class="metric-name">CPU使用率</span>
-                <span class="metric-value">{{ performanceData.system_health?.cpu_percent || 0 }}%</span>
+                <span class="metric-value">{{ formatPercentage(performanceData.system_health?.cpu_percent) }}%</span>
               </div>
               <el-progress 
                 :percentage="performanceData.system_health?.cpu_percent || 0" 
@@ -104,19 +106,25 @@
             <div class="metric-item">
               <div class="metric-header">
                 <span class="metric-name">内存使用率</span>
-                <span class="metric-value">{{ performanceData.memory_stats?.memory_info?.process_memory?.percent || 0 }}%</span>
+                <div class="metric-value-container">
+                  <span class="metric-value">{{ formatPercentage(performanceData.memory_stats?.memory_info?.system_memory?.percent) }}%</span>
+                  <span class="metric-detail-small">{{ getMemoryUsageDetail(performanceData.memory_stats) }}</span>
+                </div>
               </div>
               <el-progress 
-                :percentage="performanceData.memory_stats?.memory_info?.process_memory?.percent || 0" 
+                :percentage="performanceData.memory_stats?.memory_info?.system_memory?.percent || 0" 
                 :stroke-width="8"
-                :color="getPerformanceColor(performanceData.memory_stats?.memory_info?.process_memory?.percent || 0)"
+                :color="getPerformanceColor(performanceData.memory_stats?.memory_info?.system_memory?.percent || 0)"
               />
             </div>
             
             <div class="metric-item">
               <div class="metric-header">
                 <span class="metric-name">磁盘使用率</span>
-                <span class="metric-value">{{ performanceData.system_health?.disk_usage?.percent || 0 }}%</span>
+                <div class="metric-value-container">
+                  <span class="metric-value">{{ formatPercentage(performanceData.system_health?.disk_usage?.percent) }}%</span>
+                  <span class="metric-detail-small">{{ getDiskUsageDetail(performanceData.system_health) }}</span>
+                </div>
               </div>
               <el-progress 
                 :percentage="performanceData.system_health?.disk_usage?.percent || 0" 
@@ -589,6 +597,47 @@ const exportPerformanceReport = async () => {
 }
 
 // 工具方法
+const formatPercentage = (value: number | undefined): string => {
+  if (value === undefined || value === null) return '0.0'
+  return value.toFixed(1)
+}
+
+const formatBytes = (bytes: number | undefined): string => {
+  if (!bytes) return '0 B'
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`
+}
+
+const getMemoryUsageDetail = (memoryStats: any): string => {
+  if (!memoryStats?.memory_info?.system_memory) return 'N/A'
+  
+  const systemMemory = memoryStats.memory_info.system_memory
+  const usedGB = systemMemory.used_gb || (systemMemory.used ? (systemMemory.used / (1024**3)).toFixed(1) : '0')
+  const totalGB = systemMemory.total_gb || '0'
+  
+  return `${usedGB}GB / ${totalGB}GB`
+}
+
+const getProcessMemoryDetail = (memoryStats: any): string => {
+  if (!memoryStats?.memory_info?.process_memory) return 'N/A'
+  
+  const processMemory = memoryStats.memory_info.process_memory
+  const usedMB = processMemory.rss_mb || '0'
+  
+  return `${usedMB}MB`
+}
+
+const getDiskUsageDetail = (systemHealth: any): string => {
+  if (!systemHealth?.disk_usage) return 'N/A'
+  
+  const diskUsage = systemHealth.disk_usage
+  const usedGB = diskUsage.used ? (diskUsage.used / (1024**3)).toFixed(1) : '0'
+  const totalGB = diskUsage.total ? (diskUsage.total / (1024**3)).toFixed(1) : '0'
+  
+  return `${usedGB}GB / ${totalGB}GB`
+}
+
 const getPerformanceColor = (percentage: number) => {
   if (percentage < 60) return '#67c23a'
   if (percentage < 80) return '#e6a23c'
@@ -693,10 +742,30 @@ onUnmounted(() => {
   line-height: 1;
 }
 
+.metric-detail {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  font-weight: normal;
+}
+
 .metric-label {
   font-size: 14px;
   color: #909399;
   margin-top: 8px;
+}
+
+.metric-value-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.metric-detail-small {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 2px;
+  font-weight: normal;
 }
 
 .card-header {

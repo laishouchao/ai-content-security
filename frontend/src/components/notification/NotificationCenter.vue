@@ -327,7 +327,7 @@ const playNotificationSound = () => {
   }
 }
 
-const handleDesktopPermission = (enabled: boolean) => {
+const handleDesktopPermission = (enabled: string | number | boolean) => {
   if (enabled && Notification.permission === 'default') {
     Notification.requestPermission().then(permission => {
       if (permission !== 'granted') {
@@ -341,7 +341,7 @@ const handleDesktopPermission = (enabled: boolean) => {
 // WebSocket事件处理
 const setupWebSocketListeners = () => {
   // 任务相关通知
-  wsStore.on('task_created', (data) => {
+  wsStore.on('task_created', (data: any) => {
     if (settings.value.taskCompletion) {
       addNotification({
         type: 'task',
@@ -353,7 +353,7 @@ const setupWebSocketListeners = () => {
     }
   })
 
-  wsStore.on('task_completed', (data) => {
+  wsStore.on('task_completed', (data: any) => {
     if (settings.value.taskCompletion) {
       addNotification({
         type: data.status === 'completed' ? 'success' : 'error',
@@ -365,7 +365,7 @@ const setupWebSocketListeners = () => {
     }
   })
 
-  wsStore.on('task_error', (data) => {
+  wsStore.on('task_error', (data: any) => {
     addNotification({
       type: 'error',
       title: '任务执行错误',
@@ -375,7 +375,7 @@ const setupWebSocketListeners = () => {
     })
   })
 
-  wsStore.on('violation_detected', (data) => {
+  wsStore.on('violation_detected', (data: any) => {
     if (settings.value.violationDetection) {
       addNotification({
         type: 'warning',
@@ -388,7 +388,7 @@ const setupWebSocketListeners = () => {
   })
 
   // 系统状态通知
-  wsStore.on('system_status_update', (data) => {
+  wsStore.on('system_status_update', (data: any) => {
     if (settings.value.systemStatus && data.alert) {
       addNotification({
         type: data.alert.type,
@@ -401,7 +401,7 @@ const setupWebSocketListeners = () => {
   })
 
   // 管理员广播消息
-  wsStore.on('admin_broadcast', (data) => {
+  wsStore.on('admin_broadcast', (data: any) => {
     addNotification({
       type: 'info',
       title: '系统公告',
@@ -544,6 +544,7 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
