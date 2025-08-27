@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
+import os
+import uuid
+from pathlib import Path
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, rate_limit
@@ -183,6 +186,70 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="密码修改失败，请稍后重试"
+        )
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> dict:
+    """上传用户头像"""
+    try:
+        # 验证文件类型
+        if not file.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="只能上传图片文件"
+            )
+        
+        # 验证文件大小（2MB）
+        if file.size > 2 * 1024 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件大小不能超过 2MB"
+            )
+        
+        # 创建上传目录
+        upload_dir = Path("uploads/avatars")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 生成唯一文件名
+        file_extension = Path(file.filename).suffix if file.filename else '.jpg'
+        file_name = f"{current_user.id}_{uuid.uuid4().hex}{file_extension}"
+        file_path = upload_dir / file_name
+        
+        # 保存文件
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # 生成访问 URL
+        avatar_url = f"/static/avatars/{file_name}"
+        
+        # 更新用户头像地址
+        user_service = UserService(db)
+        await user_service.update_user(str(current_user.id), {
+            "avatar_url": avatar_url
+        })
+        
+        logger.info(f"用户头像上传成功: {current_user.username}")
+        return {
+            "success": True,
+            "data": {
+                "avatar_url": avatar_url
+            },
+            "message": "头像上传成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"头像上传异常: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="头像上传失败"
         )
 
 

@@ -15,9 +15,44 @@
           <template #header>
             <div class="card-header">
               <span>基本信息</span>
-              <el-tag :type="getStatusType(task.status)">
-                {{ getStatusText(task.status) }}
-              </el-tag>
+              <div class="task-actions">
+                <el-tag :type="getStatusType(task.status)">
+                  {{ getStatusText(task.status) }}
+                </el-tag>
+                <!-- 任务操作按钮 -->
+                <div class="action-buttons">
+                  <el-button 
+                    v-if="canCancelTask(task.status)" 
+                    type="warning" 
+                    size="small" 
+                    :loading="cancelling"
+                    @click="cancelTask"
+                  >
+                    <el-icon><Close /></el-icon>
+                    取消任务
+                  </el-button>
+                  <el-button 
+                    v-if="canRetryTask(task.status)" 
+                    type="primary" 
+                    size="small" 
+                    :loading="retrying"
+                    @click="retryTask"
+                  >
+                    <el-icon><Refresh /></el-icon>
+                    重试任务
+                  </el-button>
+                  <el-button 
+                    v-if="canDeleteTask(task.status)" 
+                    type="danger" 
+                    size="small" 
+                    :loading="deleting"
+                    @click="deleteTask"
+                  >
+                    <el-icon><Delete /></el-icon>
+                    删除任务
+                  </el-button>
+                </div>
+              </div>
             </div>
           </template>
           
@@ -177,13 +212,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Close, Refresh, Delete } from '@element-plus/icons-vue'
 import { taskAPI, type Task } from '@/api/task'
 import type { SubdomainRecord, ViolationRecord, TaskLog, ThirdPartyDomain } from '@/types/api'
 
 const route = useRoute()
+const router = useRouter()
 const taskId = route.params.id
 
 // 响应式状态
@@ -191,6 +227,9 @@ const loading = ref(false)
 const subdomainsLoading = ref(false)
 const domainsLoading = ref(false)
 const logsLoading = ref(false)
+const cancelling = ref(false)
+const retrying = ref(false)
+const deleting = ref(false)
 
 const task = ref<Task>({} as Task)
 const subdomains = ref<SubdomainRecord[]>([])
@@ -347,6 +386,110 @@ const fetchLogs = async () => {
   }
 }
 
+// 任务状态判断方法
+const canCancelTask = (status: string) => {
+  return status === 'pending' || status === 'running'
+}
+
+const canRetryTask = (status: string) => {
+  return status === 'failed' || status === 'cancelled'
+}
+
+const canDeleteTask = (status: string) => {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+// 任务操作方法
+const cancelTask = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要取消这个任务吗？取消后任务将停止执行。',
+      '确认取消任务',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    cancelling.value = true
+    const response = await taskAPI.stopTask(taskId as string)
+    
+    if (response.data.success) {
+      ElMessage.success('任务已成功取消')
+      // 刷新任务详情
+      await fetchTaskDetail()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('取消任务失败:', error)
+      ElMessage.error('取消任务失败')
+    }
+  } finally {
+    cancelling.value = false
+  }
+}
+
+const retryTask = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要重试这个任务吗？任务将重新开始执行。',
+      '确认重试任务',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+    
+    retrying.value = true
+    const response = await taskAPI.retryTask(taskId as string)
+    
+    if (response.data.success) {
+      ElMessage.success('任务已重新启动')
+      // 刷新任务详情
+      await fetchTaskDetail()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('重试任务失败:', error)
+      ElMessage.error('重试任务失败')
+    }
+  } finally {
+    retrying.value = false
+  }
+}
+
+const deleteTask = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这个任务吗？删除后任务的所有数据将被永久移除，此操作不可撤销。',
+      '确认删除任务',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'error'
+      }
+    )
+    
+    deleting.value = true
+    const response = await taskAPI.deleteTask(taskId as string)
+    
+    if (response.data.success) {
+      ElMessage.success('任务已成功删除')
+      // 返回任务列表页面
+      router.push('/tasks')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('删除任务失败:', error)
+      ElMessage.error('删除任务失败')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
+
 onMounted(() => {
   if (taskId) {
     fetchTaskDetail()
@@ -379,6 +522,17 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.task-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
 }
 
 .domain-name {

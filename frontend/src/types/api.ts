@@ -6,6 +6,10 @@ export interface User {
   role: string
   is_active: boolean
   created_at: string
+  full_name?: string
+  avatar_url?: string
+  bio?: string
+  last_login?: string
 }
 
 export interface LoginRequest {
@@ -24,6 +28,81 @@ export interface RegisterRequest {
   username: string
   email: string
   password: string
+}
+
+// AI配置相关类型
+export interface AIConfig {
+  id: string
+  user_id: string
+  openai_api_key: string
+  openai_base_url: string
+  openai_organization?: string
+  ai_model_name: string
+  max_tokens: number
+  temperature: number
+  system_prompt?: string
+  custom_prompt_template?: string
+  request_timeout: number
+  retry_count: number
+  enable_streaming: boolean
+  has_valid_config: boolean
+  created_at: string
+  updated_at: string
+  last_tested?: string
+}
+
+export interface AIConfigRequest {
+  openai_api_key: string
+  openai_base_url: string
+  openai_organization?: string
+  ai_model_name: string
+  max_tokens: number
+  temperature: number
+  system_prompt?: string
+  custom_prompt_template?: string
+  request_timeout: number
+  retry_count: number
+  enable_streaming: boolean
+}
+
+export interface AIConfigTestResponse {
+  is_successful: boolean
+  message: string
+  response_time?: number
+  error_details?: string
+  test_result?: any
+}
+
+// 系统配置类型
+export interface SystemConfig {
+  scan_limits: {
+    max_concurrent_tasks_per_user: number
+    max_subdomains_per_task: number
+    max_crawl_depth: number
+    task_timeout_hours: number
+  }
+  ai_settings: {
+    default_model: string
+    default_max_tokens: number
+    default_temperature: number
+    request_timeout: number
+    retry_count: number
+  }
+  security: {
+    max_login_attempts: number
+    lockout_duration_minutes: number
+    rate_limit_per_minute: number
+    access_token_expire_minutes: number
+  }
+}
+
+// API响应类型
+export interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  message?: string
+  error_code?: string
+  request_id?: string
 }
 
 // 任务相关类型
@@ -186,4 +265,47 @@ export interface WebSocketMessage {
   type: string
   timestamp: string
   [key: string]: any
+}
+
+// 报告相关类型
+export interface ScanReport {
+  id: string
+  task_id: string
+  task_name: string
+  scan_start_time: string
+  scan_end_time: string | null
+  total_domains: number
+  analyzed_domains: number
+  violation_domains: number
+  report_status: 'generating' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
+}
+
+export interface ReportSummary {
+  task_id: string
+  task_name: string
+  scan_duration: number
+  total_domains: number
+  analyzed_domains: number
+  violation_domains: number
+  risk_distribution: {
+    critical: number
+    high: number
+    medium: number
+    low: number
+  }
+  violation_types: Record<string, number>
+  top_violation_domains: Array<{
+    domain: string
+    violation_count: number
+    risk_level: string
+  }>
+}
+
+export interface ReportFilter {
+  task_name?: string
+  status?: string
+  date_from?: string
+  date_to?: string
 }

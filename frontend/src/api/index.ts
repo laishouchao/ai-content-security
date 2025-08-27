@@ -3,6 +3,8 @@ export * from './auth'
 export * from './task'
 export * from './config'
 export * from './domain'
+export * from './report'
+export * from './statistics'
 export { default as http } from './http'
 export { axiosInstance } from './http'
 

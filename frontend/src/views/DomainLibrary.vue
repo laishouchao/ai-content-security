@@ -321,7 +321,7 @@ const searchDomains = async () => {
     if (filters.domain_type) params.domain_type = filters.domain_type
     if (filters.risk_level) params.risk_level = filters.risk_level
     if (filters.has_violations !== undefined) {
-      params.has_violations = filters.has_violations === 'true'
+      params.has_violations = filters.has_violations
     }
     
     const response = await domainAPI.getAllDomains(params)

@@ -7,6 +7,14 @@
         <p>管理和监控所有的域名扫描任务</p>
       </div>
       <div class="header-right">
+        <el-button 
+          v-if="selectedTasks.length > 0" 
+          type="danger" 
+          :disabled="!canBatchDelete"
+          @click="batchDeleteTasks"
+        >
+          批量删除 ({{ selectedTasks.length }})
+        </el-button>
         <el-button type="primary" @click="$router.push('/tasks/create')">
           <el-icon><Plus /></el-icon>
           创建任务
@@ -53,7 +61,9 @@
         v-loading="loading"
         style="width: 100%"
         @row-click="goToTaskDetail"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="55" />
         <el-table-column label="任务名称" width="150">
           <template #default="{ row }">
             <span v-if="row.task_name">{{ row.task_name }}</span>
@@ -154,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
@@ -165,6 +175,7 @@ const router = useRouter()
 
 // 响应式状态
 const loading = ref(false)
+const selectedTasks = ref<Task[]>([])
 const filters = reactive<TaskFilter>({
   status: undefined,
   domain: undefined
@@ -177,6 +188,13 @@ const pagination = reactive({
 })
 
 const tasks = ref<Task[]>([])
+
+// 计算属性
+const canBatchDelete = computed(() => {
+  return selectedTasks.value.every(task => 
+    task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  )
+})
 
 // 方法
 const getStatusType = (status: string): 'info' | 'warning' | 'success' | 'danger' => {
@@ -322,6 +340,48 @@ const handleSizeChange = (size: number) => {
 const handleCurrentChange = (page: number) => {
   pagination.page = page
   searchTasks()
+}
+
+// 批量操作方法
+const handleSelectionChange = (selection: Task[]) => {
+  selectedTasks.value = selection
+}
+
+const batchDeleteTasks = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedTasks.value.length} 个任务吗？此操作不可恢复！`,
+      '警告',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'error'
+      }
+    )
+    
+    // 逐个删除任务
+    const deletePromises = selectedTasks.value.map(task => taskAPI.deleteTask(task.id))
+    const results = await Promise.allSettled(deletePromises)
+    
+    const successCount = results.filter(result => result.status === 'fulfilled').length
+    const failureCount = results.length - successCount
+    
+    if (successCount > 0) {
+      ElMessage.success(`成功删除 ${successCount} 个任务`)
+    }
+    if (failureCount > 0) {
+      ElMessage.warning(`${failureCount} 个任务删除失败`)
+    }
+    
+    // 清空选中项并刷新列表
+    selectedTasks.value = []
+    searchTasks()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('批量删除任务失败:', error)
+      ElMessage.error('批量删除任务失败')
+    }
+  }
 }
 
 onMounted(() => {

@@ -186,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -395,9 +395,64 @@ const goToTaskDetail = (taskId: string | number) => {
   router.push(`/tasks/${taskId}`)
 }
 
+// WebSocket实时连接
+const connectWebSocket = () => {
+  if (wsStore.isConnected) {
+    return
+  }
+  
+  wsStore.connect().then(() => {
+    // 监听任务状态更新
+    wsStore.on('task_status_update', (data: any) => {
+      console.log('任务状态更新:', data)
+      // 刷新统计数据
+      loadDashboardData()
+    })
+    
+    // 监听系统状态更新
+    wsStore.on('system_status_update', (data: any) => {
+      console.log('系统状态更新:', data)
+      if (dashboardStats.value.systemStatus) {
+        Object.assign(dashboardStats.value.systemStatus, data)
+      }
+    })
+    
+    // 监听扫描进度更新
+    wsStore.on('scan_progress', (data: any) => {
+      console.log('扫描进度更新:', data)
+      // 更新对应任务的进度
+      updateTaskProgress(data)
+    })
+  }).catch(error => {
+    console.error('WebSocket连接失败:', error)
+  })
+}
+
+const updateTaskProgress = (progressData: any) => {
+  if (dashboardStats.value.recentTasks) {
+    const task = dashboardStats.value.recentTasks.find(t => t.id === progressData.task_id)
+    if (task) {
+      task.progress = progressData.progress
+      task.status = progressData.status
+    }
+  }
+}
+
+// 定时刷新数据
+const startAutoRefresh = () => {
+  // 每30秒刷新一次统计数据
+  setInterval(() => {
+    if (!loading.value) {
+      loadDashboardData()
+    }
+  }, 30000)
+}
+
 // 生命周期
 onMounted(() => {
   loadDashboardData()
+  connectWebSocket()
+  startAutoRefresh()
   
   // 设置定时刷新（每5分钟）
   const refreshInterval = setInterval(loadDashboardData, 5 * 60 * 1000)
@@ -406,6 +461,13 @@ onMounted(() => {
   return () => {
     clearInterval(refreshInterval)
   }
+})
+
+// 组件卸载时清理WebSocket监听器
+onUnmounted(() => {
+  wsStore.off('task_status_update')
+  wsStore.off('system_status_update')
+  wsStore.off('scan_progress')
 })
 </script>
 

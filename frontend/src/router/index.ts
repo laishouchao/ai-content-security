@@ -25,8 +25,13 @@ const TaskDetail = () => import('@/views/task/TaskDetail.vue')
 const CreateTask = () => import('@/views/task/CreateTask.vue')
 const DomainLibrary = () => import('@/views/DomainLibrary.vue')
 const DomainDetail = () => import('@/views/DomainDetail.vue')
+const DomainWhitelist = () => import('@/views/DomainWhitelist.vue')
+const DomainListDetail = () => import('@/views/DomainListDetail.vue')
+const Reports = () => import('@/views/Reports.vue')
+const Statistics = () => import('@/views/Statistics.vue')
 const Profile = () => import('@/views/user/Profile.vue')
 const Settings = () => import('@/views/settings/Settings.vue')
+const Performance = () => import('@/views/Performance.vue')
 const NotFound = () => import('@/views/error/NotFound.vue')
 
 // 路由配置
@@ -112,6 +117,42 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'domain-lists',
+        name: 'DomainWhitelist',
+        component: DomainWhitelist,
+        meta: {
+          title: '域名列表管理',
+          icon: 'Shield'
+        }
+      },
+      {
+        path: 'domain-lists/:id',
+        name: 'DomainListDetail',
+        component: DomainListDetail,
+        meta: {
+          title: '域名列表详情',
+          hidden: true
+        }
+      },
+      {
+        path: 'reports',
+        name: 'Reports',
+        component: Reports,
+        meta: {
+          title: '报告管理',
+          icon: 'Document'
+        }
+      },
+      {
+        path: 'statistics',
+        name: 'Statistics',
+        component: Statistics,
+        meta: {
+          title: '统计报表',
+          icon: 'DataBoard'
+        }
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: Profile,
@@ -127,6 +168,16 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '系统设置',
           icon: 'Setting',
+          roles: ['admin']
+        }
+      },
+      {
+        path: 'performance',
+        name: 'Performance',
+        component: Performance,
+        meta: {
+          title: '性能监控',
+          icon: 'Monitor',
           roles: ['admin']
         }
       }

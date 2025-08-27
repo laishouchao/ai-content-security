@@ -101,19 +101,31 @@
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Bell } from '@element-plus/icons-vue'
+import { notificationAPI, type NotificationConfig } from '@/api/notification'
 
 // 配置数据
-const config = reactive({
+const config = reactive<NotificationConfig>({
   email_enabled: false,
-  smtp_host: '',
-  smtp_port: 587,
-  sender_email: '',
-  sender_password: '',
-  notify_task_completed: true,
-  notify_violations: true,
-  notify_errors: true,
-  high_risk_threshold: 'immediate',
-  recipient_emails: [] as string[]
+  email_recipients: [],
+  email_smtp_host: '',
+  email_smtp_port: 587,
+  email_smtp_username: '',
+  email_smtp_password: '',
+  email_smtp_use_tls: true,
+  
+  webhook_enabled: false,
+  webhook_url: '',
+  webhook_secret: '',
+  webhook_events: [],
+  
+  task_completion_notification: true,
+  violation_detection_notification: true,
+  system_error_notification: true,
+  daily_report_notification: false,
+  
+  notification_threshold: 3,
+  notification_quiet_hours_start: '22:00',
+  notification_quiet_hours_end: '08:00'
 })
 
 // 添加邮箱相关
@@ -122,6 +134,7 @@ const inputValue = ref('')
 const inputRef = ref()
 const saving = ref(false)
 const testing = ref(false)
+const loading = ref(false)
 
 // 显示输入框
 const showInput = () => {
@@ -133,11 +146,11 @@ const showInput = () => {
 
 // 确认添加邮箱
 const handleInputConfirm = () => {
-  if (inputValue.value && !config.recipient_emails.includes(inputValue.value)) {
+  if (inputValue.value && !config.email_recipients.includes(inputValue.value)) {
     // 简单的邮箱格式验证
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (emailRegex.test(inputValue.value)) {
-      config.recipient_emails.push(inputValue.value)
+      config.email_recipients.push(inputValue.value)
       inputValue.value = ''
     } else {
       ElMessage.error('请输入有效的邮箱地址')
@@ -148,9 +161,9 @@ const handleInputConfirm = () => {
 
 // 移除邮箱
 const removeRecipient = (email: string) => {
-  const index = config.recipient_emails.indexOf(email)
+  const index = config.email_recipients.indexOf(email)
   if (index > -1) {
-    config.recipient_emails.splice(index, 1)
+    config.email_recipients.splice(index, 1)
   }
 }
 
@@ -158,10 +171,10 @@ const removeRecipient = (email: string) => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    // TODO: 调用API保存配置
-    await new Promise(resolve => setTimeout(resolve, 1000)) // 模拟API调用
+    await notificationAPI.updateNotificationConfig(config)
     ElMessage.success('通知配置保存成功')
   } catch (error) {
+    console.error('保存通知配置失败:', error)
     ElMessage.error('保存配置失败')
   } finally {
     saving.value = false
@@ -175,17 +188,20 @@ const testNotification = async () => {
     return
   }
   
-  if (config.recipient_emails.length === 0) {
+  if (config.email_recipients.length === 0) {
     ElMessage.warning('请至少添加一个接收人邮箱')
     return
   }
 
   testing.value = true
   try {
-    // TODO: 调用API发送测试通知
-    await new Promise(resolve => setTimeout(resolve, 2000)) // 模拟API调用
+    await notificationAPI.testNotification({
+      type: 'email',
+      message: '这是一条测试通知消息'
+    })
     ElMessage.success('测试通知发送成功，请检查邮箱')
   } catch (error) {
+    console.error('发送测试通知失败:', error)
     ElMessage.error('发送测试通知失败')
   } finally {
     testing.value = false
@@ -194,15 +210,21 @@ const testNotification = async () => {
 
 // 加载配置
 const loadConfig = async () => {
+  loading.value = true
   try {
-    // TODO: 调用API加载配置
-    // const response = await api.getNotificationConfig()
-    // Object.assign(config, response.data)
+    const response = await notificationAPI.getNotificationConfig()
+    if (response.data.success && response.data.data) {
+      Object.assign(config, response.data.data)
+    }
   } catch (error) {
+    console.error('加载通知配置失败:', error)
     ElMessage.error('加载通知配置失败')
+  } finally {
+    loading.value = false
   }
 }
 
+// 生命周期
 onMounted(() => {
   loadConfig()
 })

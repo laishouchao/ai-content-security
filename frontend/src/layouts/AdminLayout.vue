@@ -52,28 +52,14 @@
           </div>
           
           <div class="header-right">
-            <!-- WebSocket连接状态 -->
-            <div class="connection-status">
-              <el-tooltip 
-                :content="wsStore.connectionStatusText" 
-                placement="bottom"
-              >
-                <el-badge 
-                  :type="wsStore.connectionStatusType as 'info' | 'warning' | 'success' | 'danger'"
-                  is-dot
-                  class="status-badge"
-                >
-                  <el-icon><Connection /></el-icon>
-                </el-badge>
-              </el-tooltip>
-            </div>
+            <!-- 实时状态指示器 -->
+            <RealtimeStatus 
+              :show-performance="false" 
+              @notification-click="showNotificationCenter" 
+            />
             
-            <!-- 通知 -->
-            <el-badge :value="12" class="notification-badge">
-              <el-button type="text">
-                <el-icon><Bell /></el-icon>
-              </el-button>
-            </el-badge>
+            <!-- 通知中心 -->
+            <NotificationCenter ref="notificationCenter" />
             
             <!-- 用户菜单 -->
             <el-dropdown @command="handleUserCommand">
@@ -127,8 +113,11 @@ import {
   ArrowDown,
   SwitchButton,
   Monitor,
-  Connection
+  Connection,
+  Lock
 } from '@element-plus/icons-vue'
+import NotificationCenter from '@/components/notification/NotificationCenter.vue'
+import RealtimeStatus from '@/components/notification/RealtimeStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,6 +126,7 @@ const wsStore = useWebSocketStore()
 
 // 响应式状态
 const collapsed = ref(false)
+const notificationCenter = ref<InstanceType<typeof NotificationCenter>>()
 
 // 计算属性
 const activeMenu = computed(() => route.path)
@@ -150,12 +140,14 @@ const menuItems = computed(() => {
     { path: '/tasks', title: '任务列表', icon: 'List' },
     { path: '/tasks/create', title: '创建任务', icon: 'Plus' },
     { path: '/domains', title: '域名库', icon: 'Link' },
+    { path: '/domain-lists', title: '域名列表', icon: 'Lock' },
     { path: '/profile', title: '个人资料', icon: 'User' }
   ]
   
   // 只有管理员才能看到系统设置
   if (authStore.isAdmin) {
     items.push({ path: '/settings', title: '系统设置', icon: 'Setting' })
+    items.push({ path: '/performance', title: '性能监控', icon: 'Monitor' })
   }
   
   return items
@@ -176,6 +168,10 @@ const handleUserCommand = async (command: string) => {
       router.push('/login')
       break
   }
+}
+
+const showNotificationCenter = () => {
+  // 由NotificationCenter组件内部处理显示逻辑
 }
 
 // 组件挂载时初始化认证状态和WebSocket连接

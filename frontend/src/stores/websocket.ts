@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElNotification } from 'element-plus'
 import { useTaskStore } from './task'
 
 // WebSocket消息类型
@@ -54,6 +54,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
   const maxReconnectAttempts = ref(5)
   const reconnectInterval = ref(5000)
   const messages = ref<WebSocketMessage[]>([])
+  const lastError = ref<string>('')
+  const connectedAt = ref<string>('')
   
   // 计算属性
   const isConnected = computed(() => status.value === WebSocketStatus.CONNECTED)
@@ -79,7 +81,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
   })
 
   // 连接WebSocket
-  const connect = () => {
+  const connect = async () => {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       console.log('WebSocket已连接，无需重复连接')
       return
@@ -88,21 +90,112 @@ export const useWebSocketStore = defineStore('websocket', () => {
     try {
       status.value = WebSocketStatus.CONNECTING
       
-      // 开发环境使用mock连接
-      if (import.meta.env.DEV) {
-        console.log('🔌 开发模式：模拟WebSocket连接')
-        simulateConnection()
+      // 获取用户令牌用于认证
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+      if (!token) {
+        const errorMsg = '用户未登录，无法建立 WebSocket 连接'
+        console.warn('WebSocket连接失败：未找到用户令牌，请先登录')
+        lastError.value = '用户未登录'
+        status.value = WebSocketStatus.ERROR
+        
+        // 如果用户未登录，不建立连接
+        if (import.meta.env.DEV) {
+          console.log('🔄 开发环境：用户未登录，跳过WebSocket连接')
+        } else {
+          // 生产环境下提示用户登录
+          ElNotification({
+            title: 'WebSocket连接失败',
+            message: '请先登录再使用实时功能',
+            type: 'warning',
+            duration: 5000
+          })
+        }
         return
       }
       
-      // 生产环境真实连接
-      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`
+      // 构建WebSocket URL
+      const baseUrl = import.meta.env.DEV ? 'localhost:8000' : window.location.host
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${protocol}//${baseUrl}/api/v1/ws?token=${token}`
+      
+      console.log('🔌 尝试连接WebSocket服务:', wsUrl.replace(/token=[^&]+/, 'token=***'))
+      
+      // 先检查后端服务是否可用
+      if (import.meta.env.DEV) {
+        try {
+          const healthCheck = await fetch(`http://${baseUrl}/api/v1/health`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          })
+          if (!healthCheck.ok) {
+            throw new Error(`后端服务不可用: ${healthCheck.status}`)
+          }
+          console.log('✅ 后端服务可用')
+        } catch (healthError) {
+          console.warn('⚠️ 后端服务检查失败:', healthError)
+          lastError.value = '后端服务不可用'
+          status.value = WebSocketStatus.ERROR
+          return
+        }
+      }
+      
+      // 创建WebSocket连接
       ws.value = new WebSocket(wsUrl)
       
+      // 设置连接超时
+      const connectTimeout = setTimeout(() => {
+        if (ws.value && ws.value.readyState === WebSocket.CONNECTING) {
+          console.error('❌ WebSocket连接超时')
+          lastError.value = '连接超时'
+          ws.value.close()
+          status.value = WebSocketStatus.ERROR
+        }
+      }, 10000) // 10秒超时
+      
+      // 连接成功或失败时清除超时定时器
+      const clearConnectTimeout = () => {
+        clearTimeout(connectTimeout)
+      }
+      
       setupEventHandlers()
+      
+      // 监听连接成功或失败
+      const originalOnOpen = ws.value.onopen
+      const originalOnError = ws.value.onerror
+      
+      ws.value.onopen = (event) => {
+        clearConnectTimeout()
+        lastError.value = ''
+        connectedAt.value = new Date().toISOString()
+        if (originalOnOpen) originalOnOpen.call(ws.value, event)
+      }
+      
+      ws.value.onerror = (event) => {
+        clearConnectTimeout()
+        lastError.value = 'WebSocket连接错误'
+        if (originalOnError) originalOnError.call(ws.value, event)
+        
+        // 在开发环境下，连接失败时回退到模拟模式
+        if (import.meta.env.DEV && status.value === WebSocketStatus.ERROR) {
+          console.log('🔄 WebSocket连接失败，回退到模拟模式')
+          setTimeout(() => {
+            simulateConnection()
+          }, 1000)
+        }
+      }
+      
     } catch (error) {
-      console.error('WebSocket连接失败:', error)
+      console.error('WebSocket连接初始化失败:', error)
+      lastError.value = `连接初始化失败: ${error}`
       status.value = WebSocketStatus.ERROR
+      
+      // 在开发环境下回退到模拟连接
+      if (import.meta.env.DEV) {
+        console.log('🔄 初始化失败，回退到模拟模式')
+        simulateConnection()
+      }
     }
   }
 
@@ -119,6 +212,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
     ws.value.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data)
+        console.log('📨 收到后端WebSocket消息:', message)
         handleMessage(message)
       } catch (error) {
         console.error('WebSocket消息解析失败:', error)
@@ -126,17 +220,29 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
 
     ws.value.onclose = (event) => {
-      console.log('❌ WebSocket连接关闭:', event.code, event.reason)
+      console.log('❌ WebSocket连接关闭:', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      })
       status.value = WebSocketStatus.DISCONNECTED
       
-      // 自动重连
-      if (reconnectAttempts.value < maxReconnectAttempts.value) {
+      // 根据关闭代码判断是否需要重连
+      if (event.code !== 1000 && event.code !== 1001 && reconnectAttempts.value < maxReconnectAttempts.value) {
+        console.log('🔄 准备自动重连...')
         scheduleReconnect()
+      } else if (event.code === 1008) {
+        console.error('❌ WebSocket认证失败，请重新登录')
+        // 可以触发重新登录逻辑
       }
     }
 
     ws.value.onerror = (error) => {
-      console.error('❌ WebSocket错误:', error)
+      console.error('❌ WebSocket连接错误:', {
+        error,
+        readyState: ws.value?.readyState,
+        url: ws.value?.url
+      })
       status.value = WebSocketStatus.ERROR
     }
   }
@@ -202,16 +308,23 @@ export const useWebSocketStore = defineStore('websocket', () => {
     switch (message.type) {
       case 'task_progress':
         handleTaskProgress(message as TaskProgressMessage, taskStore)
+        emit('task_progress', message)
         break
       case 'task_completed':
         handleTaskCompleted(message as TaskCompletedMessage, taskStore)
+        emit('task_completed', message)
         break
       case 'violation_detected':
         handleViolationDetected(message as ViolationDetectedMessage)
+        emit('violation_detected', message)
         break
       default:
         console.log('未知消息类型:', message.type)
+        emit('unknown_message', message)
     }
+    
+    // 触发通用消息事件
+    emit('message', message)
   }
 
   // 处理任务进度消息
@@ -229,16 +342,23 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   // 处理任务完成消息
   const handleTaskCompleted = (message: TaskCompletedMessage, taskStore: any) => {
+    console.log('🚀 处理任务完成消息:', message)
+    
     // 刷新任务数据
     taskStore.fetchTasks()
     taskStore.fetchStats()
     
-    // 显示通知
+    // 显示基于后端真实数据的通知
     ElNotification({
       title: '任务完成',
-      message: message.message,
+      message: message.message, // 使用后端返回的真实消息
       type: message.status === 'completed' ? 'success' : 'error',
-      duration: 5000
+      duration: 5000,
+      customClass: 'websocket-notification',
+      onClick: () => {
+        // 可以跳转到任务详情页面
+        console.log('点击查看任务详情:', message.task_id)
+      }
     })
     
     console.log(`✅ 任务完成: ${message.task_id} - ${message.status}`)
@@ -246,15 +366,23 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   // 处理违规检测消息
   const handleViolationDetected = (message: ViolationDetectedMessage) => {
-    // 显示警告通知
+    console.log('⚠️ 处理违规检测消息:', message)
+    
+    // 显示基于后端真实数据的警告通知
     ElNotification({
       title: '发现违规内容',
-      message: `${message.violation.domain}: ${message.violation.description}`,
+      message: `域名: ${message.violation.domain}\n违规类型: ${message.violation.violation_type}\n风险等级: ${message.violation.risk_level}\n置信度: ${Math.round(message.violation.confidence_score)}%\n描述: ${message.violation.description}`,
       type: 'warning',
-      duration: 8000
+      duration: 8000,
+      dangerouslyUseHTMLString: false,
+      customClass: 'violation-notification',
+      onClick: () => {
+        // 可以跳转到违规详情或任务详情页面
+        console.log('点击查看违规详情:', message.task_id, message.violation.domain)
+      }
     })
     
-    console.log(`⚠️ 发现违规: ${message.violation.domain}`)
+    console.log(`⚠️ 发现违规: ${message.violation.domain} - ${message.violation.violation_type}`)
   }
 
   // 安排重连
@@ -292,11 +420,52 @@ export const useWebSocketStore = defineStore('websocket', () => {
     messages.value = []
   }
 
+  // 事件监听器
+  const eventListeners = ref<Map<string, Function[]>>(new Map())
+
+  // 注册事件监听器
+  const on = (event: string, callback: Function) => {
+    if (!eventListeners.value.has(event)) {
+      eventListeners.value.set(event, [])
+    }
+    eventListeners.value.get(event)!.push(callback)
+  }
+
+  // 注销事件监听器
+  const off = (event: string, callback?: Function) => {
+    if (!eventListeners.value.has(event)) return
+    
+    if (callback) {
+      const listeners = eventListeners.value.get(event)!
+      const index = listeners.indexOf(callback)
+      if (index > -1) {
+        listeners.splice(index, 1)
+      }
+    } else {
+      eventListeners.value.set(event, [])
+    }
+  }
+
+  // 触发事件
+  const emit = (event: string, data?: any) => {
+    if (eventListeners.value.has(event)) {
+      eventListeners.value.get(event)!.forEach(callback => {
+        try {
+          callback(data)
+        } catch (error) {
+          console.error(`事件监听器执行错误 (${event}):`, error)
+        }
+      })
+    }
+  }
+
   return {
     // 状态
     status: computed(() => status.value),
     reconnectAttempts: computed(() => reconnectAttempts.value),
     messages: computed(() => messages.value),
+    lastError: computed(() => lastError.value),
+    connectedAt: computed(() => connectedAt.value),
     
     // 计算属性
     isConnected,
@@ -308,6 +477,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
     connect,
     disconnect,
     send,
-    clearMessages
+    clearMessages,
+    on,
+    off,
+    emit
   }
 })

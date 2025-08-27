@@ -141,140 +141,167 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Lock } from '@element-plus/icons-vue'
+import { Shield } from '@element-plus/icons-vue'
+import { securityAPI, type SecurityConfig } from '@/api/security'
 
-// 配置数据
-const config = reactive({
-  ip_whitelist_enabled: false,
-  allowed_ips: [] as string[],
-  min_password_length: 8,
-  password_requirements: ['lowercase', 'numbers'],
+// 响应式数据
+const loading = ref(false)
+const saving = ref(false)
+const checkingStatus = ref(false)
+
+// 安全配置数据
+const config = reactive<SecurityConfig>({
+  enable_ip_whitelist: false,
+  ip_whitelist: [],
+  enable_rate_limiting: true,
+  rate_limit_requests_per_minute: 60,
+  
+  session_timeout_minutes: 30,
+  max_concurrent_sessions: 5,
+  enable_session_binding: false,
+  
+  password_min_length: 8,
+  password_require_uppercase: true,
+  password_require_lowercase: true,
+  password_require_numbers: true,
+  password_require_symbols: false,
   password_expiry_days: 90,
-  max_login_attempts: 5,
-  lockout_duration_minutes: 30,
-  session_timeout_hours: 8,
-  two_factor_enabled: false,
-  api_rate_limit: 100,
-  api_key_expiry_days: 30,
-  api_logging_enabled: true,
-  data_encryption_enabled: true,
-  data_retention_days: 365,
-  auto_backup_enabled: true,
-  backup_frequency: 'weekly'
+  password_history_count: 5,
+  
+  enable_2fa: false,
+  require_2fa_for_admin: false,
+  totp_issuer: 'AI Content Security',
+  
+  enable_audit_log: true,
+  log_retention_days: 90,
+  log_sensitive_operations: true,
+  
+  enable_api_key_auth: false,
+  api_key_expiry_days: 365,
+  enable_request_encryption: false,
+  
+  max_file_size_mb: 10,
+  allowed_file_types: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'txt', 'csv'],
+  enable_virus_scan: false
 })
 
-// IP输入相关
-const ipInputVisible = ref(false)
-const ipInputValue = ref('')
-const ipInputRef = ref()
-const saving = ref(false)
-const resetting = ref(false)
+// 安全状态数据
+const securityStatus = ref<any>(null)
 
-// 显示IP输入框
-const showIPInput = () => {
-  ipInputVisible.value = true
-  nextTick(() => {
-    ipInputRef.value?.focus()
-  })
-}
+// 新IP地址输入
+const newIpAddress = ref('')
 
-// 确认添加IP
-const handleIPInputConfirm = () => {
-  if (ipInputValue.value && !config.allowed_ips.includes(ipInputValue.value)) {
-    // 简单的IP格式验证
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/
-    if (ipRegex.test(ipInputValue.value)) {
-      config.allowed_ips.push(ipInputValue.value)
-      ipInputValue.value = ''
-    } else {
-      ElMessage.error('请输入有效的IP地址或CIDR格式')
+// 加载安全配置
+const loadConfig = async () => {
+  try {
+    loading.value = true
+    const response = await securityAPI.getSecurityConfig()
+    
+    if (response.data.success && response.data.data) {
+      Object.assign(config, response.data.data)
     }
-  }
-  ipInputVisible.value = false
-}
-
-// 移除IP
-const removeIP = (ip: string) => {
-  const index = config.allowed_ips.indexOf(ip)
-  if (index > -1) {
-    config.allowed_ips.splice(index, 1)
+  } catch (error) {
+    console.error('加载安全配置失败:', error)
+    ElMessage.error('加载安全配置失败')
+  } finally {
+    loading.value = false
   }
 }
 
 // 保存配置
 const saveConfig = async () => {
-  saving.value = true
   try {
-    // TODO: 调用API保存配置
-    await new Promise(resolve => setTimeout(resolve, 1000)) // 模拟API调用
+    saving.value = true
+    await securityAPI.updateSecurityConfig(config)
     ElMessage.success('安全配置保存成功')
   } catch (error) {
-    ElMessage.error('保存配置失败')
+    console.error('保存安全配置失败:', error)
+    ElMessage.error('保存安全配置失败')
   } finally {
     saving.value = false
   }
 }
 
-// 恢复默认设置
-const resetToDefaults = async () => {
+// 重置配置
+const resetConfig = async () => {
   try {
     await ElMessageBox.confirm(
-      '确定要恢复默认安全设置吗？这将覆盖所有当前配置。',
-      '确认操作',
+      '确定要重置为默认安全配置吗？此操作不可恢复。',
+      '确认重置',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning'
       }
     )
-
-    resetting.value = true
-    // TODO: 调用API重置配置
-    await new Promise(resolve => setTimeout(resolve, 1000)) // 模拟API调用
     
-    // 重置为默认值
-    Object.assign(config, {
-      ip_whitelist_enabled: false,
-      allowed_ips: [],
-      min_password_length: 8,
-      password_requirements: ['lowercase', 'numbers'],
-      password_expiry_days: 90,
-      max_login_attempts: 5,
-      lockout_duration_minutes: 30,
-      session_timeout_hours: 8,
-      two_factor_enabled: false,
-      api_rate_limit: 100,
-      api_key_expiry_days: 30,
-      api_logging_enabled: true,
-      data_encryption_enabled: true,
-      data_retention_days: 365,
-      auto_backup_enabled: true,
-      backup_frequency: 'weekly'
-    })
-    
-    ElMessage.success('已恢复默认安全设置')
-  } catch {
-    // 用户取消操作
-  } finally {
-    resetting.value = false
-  }
-}
-
-// 加载配置
-const loadConfig = async () => {
-  try {
-    // TODO: 调用API加载配置
-    // const response = await api.getSecurityConfig()
-    // Object.assign(config, response.data)
+    await securityAPI.resetSecurityConfig()
+    ElMessage.success('安全配置已重置')
+    await loadConfig()
   } catch (error) {
-    ElMessage.error('加载安全配置失败')
+    if (error !== 'cancel') {
+      console.error('重置安全配置失败:', error)
+      ElMessage.error('重置安全配置失败')
+    }
   }
 }
 
+// 检查安全状态
+const checkSecurityStatus = async () => {
+  try {
+    checkingStatus.value = true
+    const response = await securityAPI.getSecurityStatus()
+    
+    if (response.data.success && response.data.data) {
+      securityStatus.value = response.data.data
+    }
+  } catch (error) {
+    console.error('检查安全状态失败:', error)
+    ElMessage.error('检查安全状态失败')
+  } finally {
+    checkingStatus.value = false
+  }
+}
+
+// 添加IP地址到白名单
+const addIpToWhitelist = () => {
+  if (newIpAddress.value && !config.ip_whitelist.includes(newIpAddress.value)) {
+    // 简单的IP地址格式验证
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    if (ipRegex.test(newIpAddress.value) || newIpAddress.value.includes('/')) {
+      config.ip_whitelist.push(newIpAddress.value)
+      newIpAddress.value = ''
+    } else {
+      ElMessage.error('请输入有效的IP地址或CIDR')
+    }
+  }
+}
+
+// 从白名单中移除IP地址
+const removeIpFromWhitelist = (ip: string) => {
+  const index = config.ip_whitelist.indexOf(ip)
+  if (index > -1) {
+    config.ip_whitelist.splice(index, 1)
+  }
+}
+
+// 获取密码强度描述
+const getPasswordStrengthDescription = () => {
+  const requirements = []
+  if (config.password_require_uppercase) requirements.push('大写字母')
+  if (config.password_require_lowercase) requirements.push('小写字母')
+  if (config.password_require_numbers) requirements.push('数字')
+  if (config.password_require_symbols) requirements.push('特殊字符')
+  
+  return `最少${config.password_min_length}位，包含: ${requirements.join('、')}`
+}
+
+// 生命周期
 onMounted(() => {
   loadConfig()
+  checkSecurityStatus()
 })
 </script>
 

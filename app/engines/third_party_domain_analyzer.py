@@ -1,0 +1,436 @@
+"""
+第三方域名分析引擎
+实现访问测试、内容抓取和AI分类
+"""
+
+import asyncio
+import aiohttp
+import json
+import time
+import hashlib
+from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from dataclasses import dataclass, asdict
+from urllib.parse import urlparse
+from pathlib import Path
+import tempfile
+import base64
+
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+from app.core.logging import TaskLogger
+from app.core.config import settings
+from app.engines.ai_analysis import AIAnalysisEngine
+
+
+@dataclass
+class ThirdPartyDomainResult:
+    """第三方域名分析结果"""
+    domain: str
+    source_urls: List[str]
+    discovered_at: datetime
+    
+    # 访问测试结果
+    is_accessible: bool = False
+    response_code: Optional[int] = None
+    response_time: float = 0.0
+    final_url: Optional[str] = None
+    server_info: Optional[str] = None
+    
+    # 内容抓取结果
+    page_title: Optional[str] = None
+    page_description: Optional[str] = None
+    page_content: Optional[str] = None
+    screenshot_path: Optional[str] = None
+    content_hash: Optional[str] = None
+    
+    # AI分析结果
+    domain_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    confidence_score: float = 0.0
+    description: Optional[str] = None
+    tags: List[str] = None
+    ai_analysis_result: Optional[Dict[str, Any]] = None
+    
+    # 错误信息
+    error_message: Optional[str] = None
+    analysis_error: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+
+
+class DomainAccessTester:
+    """域名访问测试器"""
+    
+    def __init__(self):
+        self.timeout = 30
+        self.user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    
+    async def test_domain_access(self, domain: str) -> Dict[str, Any]:
+        """测试域名可访问性"""
+        start_time = time.time()
+        
+        # 尝试 HTTPS 和 HTTP
+        for protocol in ['https', 'http']:
+            url = f"{protocol}://{domain}"
+            try:
+                result = await self._test_url_access(url)
+                if result['accessible']:
+                    result['response_time'] = time.time() - start_time
+                    result['protocol_used'] = protocol
+                    return result
+            except Exception as e:
+                continue
+        
+        return {
+            'accessible': False,
+            'status_code': None,
+            'response_time': time.time() - start_time,
+            'error': '无法访问域名',
+            'protocol_used': None
+        }
+    
+    async def _test_url_access(self, url: str) -> Dict[str, Any]:
+        """测试单个URL访问"""
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        connector = aiohttp.TCPConnector(ssl=False, limit=10)
+        
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector,
+            headers={'User-Agent': self.user_agent}
+        ) as session:
+            
+            async with session.get(url, allow_redirects=True) as response:
+                return {
+                    'accessible': True,
+                    'status_code': response.status,
+                    'final_url': str(response.url),
+                    'server_info': response.headers.get('Server', ''),
+                    'content_type': response.headers.get('Content-Type', ''),
+                    'content_length': response.headers.get('Content-Length', '0')
+                }
+
+
+class DomainContentCapturer:
+    """域名内容抓取器"""
+    
+    def __init__(self, task_id: str):
+        self.task_id = task_id
+        self.screenshot_dir = Path(f"screenshots/{task_id}")
+        self.screenshot_dir.mkdir(parents=True, exist_ok=True)
+        
+    async def capture_domain_content(self, domain: str, protocol: str = 'https') -> Dict[str, Any]:
+        """抓取域名内容和截图"""
+        url = f"{protocol}://{domain}"
+        
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-dev-shm-usage']
+                )
+                
+                try:
+                    context = await browser.new_context(
+                        viewport={'width': 1280, 'height': 720},
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    )
+                    
+                    page = await context.new_page()
+                    
+                    # 设置超时时间
+                    page.set_default_timeout(30000)
+                    
+                    # 访问页面
+                    await page.goto(url, wait_until='networkidle', timeout=30000)
+                    
+                    # 等待页面加载完成
+                    await page.wait_for_timeout(3000)
+                    
+                    # 提取页面信息
+                    page_title = await page.title()
+                    
+                    # 获取meta description
+                    page_description = await page.evaluate('''
+                        () => {
+                            const meta = document.querySelector('meta[name="description"]');
+                            return meta ? meta.getAttribute('content') : '';
+                        }
+                    ''')
+                    
+                    # 获取页面文本内容（前2000字符）
+                    page_content = await page.evaluate('''
+                        () => {
+                            const text = document.body.innerText || document.body.textContent || '';
+                            return text.substring(0, 2000);
+                        }
+                    ''')
+                    
+                    # 截图
+                    screenshot_filename = f"{domain.replace('.', '_')}_{int(time.time())}.png"
+                    screenshot_path = self.screenshot_dir / screenshot_filename
+                    await page.screenshot(path=str(screenshot_path), full_page=False)
+                    
+                    # 计算内容哈希
+                    content_hash = hashlib.md5(page_content.encode('utf-8')).hexdigest()
+                    
+                    return {
+                        'title': page_title,
+                        'description': page_description,
+                        'content': page_content,
+                        'screenshot_path': str(screenshot_path),
+                        'content_hash': content_hash,
+                        'success': True
+                    }
+                    
+                finally:
+                    await browser.close()
+                    
+        except PlaywrightTimeoutError:
+            return {'success': False, 'error': '页面加载超时'}
+        except Exception as e:
+            return {'success': False, 'error': f'抓取失败: {str(e)}'}
+
+
+class ThirdPartyDomainClassifier:
+    """第三方域名AI分类器"""
+    
+    def __init__(self, ai_engine: AIAnalysisEngine):
+        self.ai_engine = ai_engine
+        self.classification_prompt = self._build_classification_prompt()
+    
+    def _build_classification_prompt(self) -> str:
+        """构建AI分类提示词"""
+        return """你是一个专业的网络安全分析师，需要对第三方域名进行分类和风险评估。
+
+请根据提供的域名信息（包括域名、页面标题、页面描述、页面内容截图），对域名进行分析并返回JSON格式的结果。
+
+分类类型 (domain_type)：
+- cdn: 内容分发网络
+- analytics: 分析统计服务
+- advertising: 广告服务
+- social: 社交媒体
+- api: API服务
+- payment: 支付服务
+- security: 安全服务
+- maps: 地图位置服务
+- email: 邮件服务
+- cloud: 云服务
+- unknown: 未知类型
+
+风险等级 (risk_level)：
+- low: 低风险 - 正常的第三方服务
+- medium: 中风险 - 需要关注的服务
+- high: 高风险 - 可能存在安全风险
+- critical: 严重风险 - 明确的恶意或违规内容
+
+请返回以下JSON格式：
+{
+    "domain_type": "分类类型",
+    "risk_level": "风险等级", 
+    "confidence": 0.85,
+    "description": "详细描述该域名的用途和特征",
+    "tags": ["标签1", "标签2"],
+    "reasoning": "分析推理过程"
+}
+
+请确保返回的是有效的JSON格式，confidence为0-1之间的浮点数。"""
+
+    async def classify_domain(self, domain: str, content_info: Dict[str, Any], screenshot_path: Optional[str] = None) -> Dict[str, Any]:
+        """使用AI对域名进行分类"""
+        try:
+            # 构建分析内容
+            analysis_content = f"""域名: {domain}
+页面标题: {content_info.get('title', 'N/A')}
+页面描述: {content_info.get('description', 'N/A')}
+页面内容摘要: {content_info.get('content', 'N/A')[:500]}...
+"""
+            
+            # 准备图片（如果有截图）
+            image_data = None
+            if screenshot_path and Path(screenshot_path).exists():
+                with open(screenshot_path, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            # 调用AI分析
+            ai_result = await self.ai_engine.analyze_content(
+                content=analysis_content,
+                system_prompt=self.classification_prompt,
+                image_data=image_data,
+                analysis_type="domain_classification"
+            )
+            
+            if ai_result.get('success'):
+                # 解析AI返回的JSON结果
+                ai_response = ai_result.get('analysis_result', '{}')
+                try:
+                    classification_result = json.loads(ai_response)
+                    
+                    # 验证结果格式
+                    required_fields = ['domain_type', 'risk_level', 'confidence', 'description']
+                    for field in required_fields:
+                        if field not in classification_result:
+                            classification_result[field] = 'unknown' if field != 'confidence' else 0.0
+                    
+                    # 确保confidence在有效范围内
+                    confidence = classification_result.get('confidence', 0.0)
+                    if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+                        classification_result['confidence'] = 0.5
+                    
+                    return {
+                        'success': True,
+                        'classification': classification_result,
+                        'ai_raw_result': ai_result
+                    }
+                    
+                except json.JSONDecodeError as e:
+                    return {
+                        'success': False,
+                        'error': f'AI返回格式解析失败: {e}',
+                        'ai_raw_result': ai_result
+                    }
+            else:
+                return {
+                    'success': False,
+                    'error': ai_result.get('error', 'AI分析失败'),
+                    'ai_raw_result': ai_result
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'域名分类异常: {str(e)}'
+            }
+
+
+class ThirdPartyDomainAnalyzer:
+    """第三方域名分析引擎主类"""
+    
+    def __init__(self, task_id: str, user_id: str):
+        self.task_id = task_id
+        self.user_id = user_id
+        self.logger = TaskLogger(task_id, user_id)
+        
+        # 初始化组件
+        self.access_tester = DomainAccessTester()
+        self.content_capturer = DomainContentCapturer(task_id)
+        
+        # AI分析引擎（延迟初始化）
+        self.ai_classifier: Optional[ThirdPartyDomainClassifier] = None
+        
+    async def analyze_domain(self, domain: str, source_urls: List[str]) -> ThirdPartyDomainResult:
+        """对第三方域名进行全面分析"""
+        result = ThirdPartyDomainResult(
+            domain=domain,
+            source_urls=source_urls,
+            discovered_at=datetime.utcnow()
+        )
+        
+        try:
+            self.logger.info(f"开始分析第三方域名: {domain}")
+            
+            # 步骤1: 访问测试
+            access_result = await self.access_tester.test_domain_access(domain)
+            result.is_accessible = access_result['accessible']
+            result.response_code = access_result.get('status_code')
+            result.response_time = access_result.get('response_time', 0.0)
+            result.final_url = access_result.get('final_url')
+            result.server_info = access_result.get('server_info')
+            
+            if not result.is_accessible:
+                result.error_message = access_result.get('error', '域名无法访问')
+                self.logger.warning(f"域名 {domain} 无法访问: {result.error_message}")
+                return result
+            
+            # 步骤2: 内容抓取
+            protocol = access_result.get('protocol_used', 'https')
+            content_result = await self.content_capturer.capture_domain_content(domain, protocol)
+            
+            if content_result.get('success'):
+                result.page_title = content_result.get('title')
+                result.page_description = content_result.get('description')
+                result.page_content = content_result.get('content')
+                result.screenshot_path = content_result.get('screenshot_path')
+                result.content_hash = content_result.get('content_hash')
+            else:
+                result.error_message = content_result.get('error', '内容抓取失败')
+                self.logger.warning(f"域名 {domain} 内容抓取失败: {result.error_message}")
+                return result
+            
+            # 步骤3: AI分类（如果有AI引擎）
+            if await self._ensure_ai_classifier():
+                classification_result = await self.ai_classifier.classify_domain(
+                    domain, content_result, result.screenshot_path
+                )
+                
+                if classification_result.get('success'):
+                    classification = classification_result['classification']
+                    result.domain_type = classification.get('domain_type', 'unknown')
+                    result.risk_level = classification.get('risk_level', 'low')
+                    result.confidence_score = classification.get('confidence', 0.0)
+                    result.description = classification.get('description', '')
+                    result.tags = classification.get('tags', [])
+                    result.ai_analysis_result = classification_result.get('ai_raw_result')
+                else:
+                    result.analysis_error = classification_result.get('error', 'AI分析失败')
+                    self.logger.warning(f"域名 {domain} AI分析失败: {result.analysis_error}")
+            
+            self.logger.info(f"域名 {domain} 分析完成")
+            return result
+            
+        except Exception as e:
+            result.error_message = f"分析异常: {str(e)}"
+            self.logger.error(f"域名 {domain} 分析异常: {e}")
+            return result
+    
+    async def batch_analyze_domains(self, domain_info_list: List[Dict[str, Any]], batch_size: int = 10) -> List[ThirdPartyDomainResult]:
+        """批量分析第三方域名"""
+        results = []
+        
+        # 分批处理
+        for i in range(0, len(domain_info_list), batch_size):
+            batch = domain_info_list[i:i + batch_size]
+            self.logger.info(f"处理第 {i//batch_size + 1} 批域名，共 {len(batch)} 个")
+            
+            # 并发分析当前批次
+            tasks = []
+            for domain_info in batch:
+                domain = domain_info['domain']
+                source_urls = domain_info.get('source_urls', [])
+                tasks.append(self.analyze_domain(domain, source_urls))
+            
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 处理结果
+            for j, result in enumerate(batch_results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"域名分析异常: {result}")
+                    # 创建错误结果
+                    domain_info = batch[j]
+                    error_result = ThirdPartyDomainResult(
+                        domain=domain_info['domain'],
+                        source_urls=domain_info.get('source_urls', []),
+                        discovered_at=datetime.utcnow(),
+                        error_message=str(result)
+                    )
+                    results.append(error_result)
+                else:
+                    results.append(result)
+        
+        self.logger.info(f"批量分析完成，共处理 {len(results)} 个域名")
+        return results
+    
+    async def _ensure_ai_classifier(self) -> bool:
+        """确保AI分类器已初始化"""
+        if self.ai_classifier is None:
+            try:
+                ai_engine = AIAnalysisEngine(self.task_id, self.user_id)
+                self.ai_classifier = ThirdPartyDomainClassifier(ai_engine)
+                return True
+            except Exception as e:
+                self.logger.warning(f"AI分类器初始化失败: {e}")
+                return False
+        return True

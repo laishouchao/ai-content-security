@@ -9,12 +9,14 @@ from typing import Dict, Any
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.v1 import auth, tasks, config, reports, admin, websocket, domains
+from app.api.v1 import auth, tasks, config, reports, admin, websocket, domains, domain_whitelist, performance
 from app.core.exceptions import CustomException
 from app.core.logging import setup_logging, logger
 from app.core.prometheus import setup_metrics, REQUEST_COUNT, REQUEST_DURATION
 from app.websocket.manager import websocket_manager
 from app.websocket.handlers import task_monitor
+from app.core.redis_lock import lock_manager
+from app.core.memory_manager import memory_manager
 
 
 @asynccontextmanager
@@ -36,6 +38,20 @@ async def lifespan(app: FastAPI):
     # 启动任务监控器
     await task_monitor.start()
     
+    # 初始化Redis锁管理器
+    try:
+        await lock_manager.initialize()
+        logger.info("Redis锁管理器初始化成功")
+    except Exception as e:
+        logger.error(f"Redis锁管理器初始化失败: {e}")
+    
+    # 启动内存管理器
+    try:
+        await memory_manager.start()
+        logger.info("内存管理器启动成功")
+    except Exception as e:
+        logger.error(f"内存管理器启动失败: {e}")
+    
     yield
     
     # 关闭时执行
@@ -46,6 +62,20 @@ async def lifespan(app: FastAPI):
     
     # 停止任务监控器
     await task_monitor.stop()
+    
+    # 关闭Redis锁管理器
+    try:
+        await lock_manager.close()
+        logger.info("Redis锁管理器已关闭")
+    except Exception as e:
+        logger.error(f"Redis锁管理器关闭失败: {e}")
+    
+    # 停止内存管理器
+    try:
+        await memory_manager.stop()
+        logger.info("内存管理器已停止")
+    except Exception as e:
+        logger.error(f"内存管理器停止失败: {e}")
 
 
 app = FastAPI(
@@ -155,6 +185,8 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["报告管理
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["系统管理"])
 app.include_router(websocket.router, prefix="/api/v1/monitor", tags=["实时监控"])
 app.include_router(domains.router, prefix="/api/v1/domains", tags=["域名库"])
+app.include_router(domain_whitelist.router, prefix="/api/v1/domain-lists", tags=["域名白名单"])
+app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])
 
 
 @app.get("/")
