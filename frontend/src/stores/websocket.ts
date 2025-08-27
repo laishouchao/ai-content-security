@@ -400,6 +400,36 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
   }
 
+  // 订阅任务状态更新
+  const subscribeToTask = (taskId: string) => {
+    if (!isConnected.value) {
+      console.warn('WebSocket未连接，无法订阅任务')
+      return
+    }
+    
+    send({
+      type: 'subscribe_task',
+      task_id: taskId
+    })
+    
+    console.log(`📡 订阅任务: ${taskId}`)
+  }
+
+  // 取消订阅任务状态更新
+  const unsubscribeFromTask = (taskId: string) => {
+    if (!isConnected.value) {
+      console.warn('WebSocket未连接，无法取消订阅任务')
+      return
+    }
+    
+    send({
+      type: 'unsubscribe_task',
+      task_id: taskId
+    })
+    
+    console.log(`📡 取消订阅任务: ${taskId}`)
+  }
+
   return {
     // 状态
     status: computed(() => status.value),
@@ -419,6 +449,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
     disconnect,
     send,
     clearMessages,
+    subscribeToTask,
+    unsubscribeFromTask,
     on,
     off,
     emit

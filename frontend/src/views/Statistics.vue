@@ -566,7 +566,8 @@ const handleDateRangeChange = (range: [string, string] | null) => {
   refreshAllData()
 }
 
-const handleAutoRefreshChange = (enabled: boolean) => {
+const handleAutoRefreshChange = (val: string | number | boolean) => {
+  const enabled = Boolean(val)
   if (enabled) {
     startAutoRefresh()
   } else {
@@ -617,7 +618,7 @@ const fetchTaskStatistics = async () => {
     } : {}
     
     const response = await statisticsAPI.getTaskStatistics(params)
-    if (response.data.success) {
+    if (response.data.success && response.data.data) {
       taskStatistics.value = response.data.data
     }
   } catch (error) {
@@ -644,7 +645,7 @@ const fetchUserActivity = async () => {
     } : {}
     
     const response = await statisticsAPI.getUserActivity(params)
-    if (response.data.success) {
+    if (response.data.success && response.data.data) {
       userActivityTable.value = response.data.data.table || []
       userActivityData.value = response.data.data.chart || {}
     }
@@ -658,7 +659,7 @@ const refreshTaskTrend = async () => {
     const response = await statisticsAPI.getTaskTrend({
       period: taskTrendPeriod.value as '7d' | '30d' | '90d'
     })
-    if (response.data.success) {
+    if (response.data.success && response.data.data) {
       const trends = response.data.data
       taskTrendData.value = {
         dates: trends.map(t => t.date),
@@ -680,7 +681,7 @@ const refreshViolationDistribution = async () => {
     } : {}
     
     const response = await statisticsAPI.getViolationDistribution(params)
-    if (response.data.success) {
+    if (response.data.success && response.data.data) {
       const distributions = response.data.data
       violationDistributionData.value = {
         types: distributions.map(d => ({
@@ -698,7 +699,7 @@ const refreshPerformanceData = async () => {
   performanceLoading.value = true
   try {
     const response = await statisticsAPI.getPerformanceTrend({ hours: 24 })
-    if (response.data.success) {
+    if (response.data.success && response.data.data) {
       const trends = response.data.data
       performanceData.value = {
         timestamps: trends.map(t => formatTime(t.timestamp)),
@@ -869,10 +870,6 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.performance-metrics {
-  space-y: 20px;
 }
 
 .metric-item {

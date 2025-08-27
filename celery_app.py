@@ -15,6 +15,12 @@ os.environ['PYTHONPATH'] = str(project_root) + os.pathsep + os.environ.get('PYTH
 from celery import Celery
 from app.core.config import settings
 
+# 导入Redis模块
+try:
+    import redis
+except ImportError:
+    redis = None
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -25,22 +31,58 @@ logger = logging.getLogger(__name__)
 def test_redis_connection():
     """启动时测试Redis连接"""
     try:
-        import redis
+        if redis is None:
+            logger.error("Redis模块未安装")
+            return False
+            
         logger.info("测试Redis连接...")
+        
+        # 检查CELERY_BROKER_URL是否存在
+        if not hasattr(settings, 'CELERY_BROKER_URL') or not settings.CELERY_BROKER_URL:
+            logger.error("CELERY_BROKER_URL未配置")
+            return False
+        
+        logger.info(f"连接URL: {settings.CELERY_BROKER_URL}")
         r = redis.from_url(settings.CELERY_BROKER_URL)
+        
+        # 检查redis连接对象是否创建成功
+        if r is None:
+            logger.error("Redis连接对象创建失败")
+            return False
+        
+        # 测试连接
         result = r.ping()
         logger.info(f"Redis连接测试成功: {result}")
         return True
     except Exception as e:
-        logger.error(f"Redis连接失败: {e}")
+        if redis and hasattr(redis, 'ConnectionError') and isinstance(e, redis.ConnectionError):
+            logger.error(f"Redis连接错误: {e}")
+        elif redis and hasattr(redis, 'RedisError') and isinstance(e, redis.RedisError):
+            logger.error(f"Redis操作错误: {e}")
+        else:
+            logger.error(f"Redis连接失败: {type(e).__name__}: {e}")
         return False
 
 def cleanup_redis_data():
     """清理可能导致冲突的Redis数据"""
     try:
-        import redis
+        if redis is None:
+            logger.error("Redis模块未安装，无法清理Redis数据")
+            return False
+            
         logger.info("清理Redis冲突数据...")
+        
+        # 检查CELERY_BROKER_URL是否存在
+        if not hasattr(settings, 'CELERY_BROKER_URL') or not settings.CELERY_BROKER_URL:
+            logger.error("CELERY_BROKER_URL未配置，无法清理Redis数据")
+            return False
+        
         r = redis.from_url(settings.CELERY_BROKER_URL)
+        
+        # 检查redis连接对象是否创建成功
+        if r is None:
+            logger.error("Redis连接对象创建失败，无法清理数据")
+            return False
         
         # 清理可能导致冲突的键
         patterns = [
@@ -49,15 +91,26 @@ def cleanup_redis_data():
         ]
         
         for pattern in patterns:
-            keys = r.keys(pattern)
-            if keys:
-                r.delete(*keys)
-                logger.info(f"清理了 {len(keys)} 个 {pattern} 键")
+            try:
+                keys = r.keys(pattern)
+                if keys and len(keys) > 0:
+                    # 转换为list以确保可以解包
+                    key_list = list(keys) if not isinstance(keys, list) else keys
+                    if key_list:
+                        r.delete(*key_list)
+                        logger.info(f"清理了 {len(key_list)} 个 {pattern} 键")
+            except Exception as pattern_e:
+                logger.warning(f"清理模式 {pattern} 时出错: {pattern_e}")
         
         logger.info("Redis数据清理完成")
         return True
     except Exception as e:
-        logger.error(f"Redis数据清理失败: {e}")
+        if redis and hasattr(redis, 'ConnectionError') and isinstance(e, redis.ConnectionError):
+            logger.error(f"Redis连接错误: {e}")
+        elif redis and hasattr(redis, 'RedisError') and isinstance(e, redis.RedisError):
+            logger.error(f"Redis操作错误: {e}")
+        else:
+            logger.error(f"Redis数据清理失败: {type(e).__name__}: {e}")
         return False
 
 # 启动时执行连接检测和数据清理
