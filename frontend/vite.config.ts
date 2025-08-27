@@ -55,17 +55,30 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path
+        rewrite: (path) => path,
+        timeout: 30000, // 30秒超时
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.error('🔥 后端代理错误:', err.message)
+            console.log('💡 请确保后端服务已启动: http://localhost:8000')
+            console.log('💡 启动命令: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload')
+          })
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('📡 API请求:', req.method, req.url)
+          })
+        }
       },
       '/health': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        timeout: 10000
       },
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: 30000
       }
     }
   },

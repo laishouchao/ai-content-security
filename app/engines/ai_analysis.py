@@ -246,10 +246,12 @@ class AIAnalysisEngine:
                     self.logger.debug(f"跳过已分析的域名: {domain.domain}")
                     continue
                 
-                # 检查必要文件是否存在
+                # 检查必要文件是否存在（改进的检查逻辑）
                 screenshot_path_value = str(domain.screenshot_path) if domain.screenshot_path is not None else ""
-                if screenshot_path_value == "" or not Path(screenshot_path_value).exists():
-                    self.logger.warning(f"域名 {domain.domain} 缺少截图文件，跳过AI分析")
+                
+                # 使用改进的截图文件检查逻辑
+                if not self._robust_screenshot_check(screenshot_path_value, domain.domain):
+                    self.logger.warning(f"域名 {domain.domain} 没有有效的截图文件，跳过AI分析")
                     # 更新域名状态
                     try:
                         setattr(domain, 'is_analyzed', True)
@@ -258,6 +260,11 @@ class AIAnalysisEngine:
                         # 如果赋值失败，忽略错误继续
                         pass
                     continue
+                
+                # 如果找到了有效的截图文件，更新domain的screenshot_path为实际可用的路径
+                valid_path = self._get_valid_screenshot_path(screenshot_path_value, domain.domain)
+                if valid_path:
+                    domain.screenshot_path = str(valid_path)
                 
                 self.logger.info(f"分析域名 ({i+1}/{len(domains)}): {domain.domain}")
                 
@@ -585,3 +592,91 @@ class AIAnalysisEngine:
         # 创建一个简单的1x1像素PNG图片的Base64数据
         png_data = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\tpHYs\x00\x00\x0b\x13\x00\x00\x0b\x13\x01\x00\x9a\x9c\x18\x00\x00\x00\nIDATx\x9cc\xf8\x00\x00\x00\x01\x00\x01\x00\x18\xdd\x8d\xb4\x1c\x00\x00\x00\x00IEND\xaeB`\x82'
         return base64.b64encode(png_data).decode('utf-8')
+    
+    def _robust_screenshot_check(self, screenshot_path: str, domain: str) -> bool:
+        """改进的截图路径检查逻辑"""
+        if not screenshot_path:
+            self.logger.debug(f"域名 {domain} 没有截图路径")
+            return False
+        
+        # 详细日志记录
+        self.logger.debug(f"检查域名 {domain} 的截图路径: {screenshot_path}")
+        
+        # 尝试多种路径检查方式
+        check_paths = []
+        
+        # 1. 原始路径
+        original_path = Path(screenshot_path)
+        check_paths.append(("原始路径", original_path))
+        
+        # 2. 绝对路径转换
+        if not original_path.is_absolute():
+            abs_path = Path.cwd() / screenshot_path
+            check_paths.append(("绝对路径", abs_path))
+        
+        # 3. storage目录路径
+        storage_path = Path("storage/screenshots") / self.task_id / Path(screenshot_path).name
+        check_paths.append(("storage路径", storage_path))
+        
+        # 4. 基于文件名在目录中查找最新文件
+        screenshot_dir = Path("storage/screenshots") / self.task_id
+        if screenshot_dir.exists():
+            # 查找以域名开头的文件（处理重复截图问题）
+            domain_files = list(screenshot_dir.glob(f"{domain}_*.png"))
+            if domain_files:
+                # 使用最新的文件
+                latest_file = max(domain_files, key=lambda f: f.stat().st_mtime)
+                check_paths.append(("域名匹配最新文件", latest_file))
+        
+        # 逐一检查路径
+        for desc, path in check_paths:
+            self.logger.debug(f"检查 {desc}: {path}")
+            if path.exists() and path.is_file():
+                # 检查文件大小，排除空文件
+                file_size = path.stat().st_size
+                if file_size > 100:  # 至少100字节，避免空文件或错误文件
+                    self.logger.info(f"域名 {domain} 截图文件找到: {desc} -> {path} ({file_size} 字节)")
+                    return True
+                else:
+                    self.logger.debug(f"{desc} 文件太小，可能是错误文件: {path} ({file_size} 字节)")
+            else:
+                self.logger.debug(f"{desc} 不存在或不是文件: {path}")
+        
+        self.logger.warning(f"域名 {domain} 所有路径检查都失败: {screenshot_path}")
+        return False
+    
+    def _get_valid_screenshot_path(self, screenshot_path: str, domain: str) -> Optional[Path]:
+        """获取有效的截图路径"""
+        if not screenshot_path:
+            return None
+        
+        # 检查各种可能的路径
+        check_paths = []
+        
+        # 1. 原始路径
+        original_path = Path(screenshot_path)
+        check_paths.append(original_path)
+        
+        # 2. 绝对路径转换
+        if not original_path.is_absolute():
+            abs_path = Path.cwd() / screenshot_path
+            check_paths.append(abs_path)
+        
+        # 3. storage目录路径
+        storage_path = Path("storage/screenshots") / self.task_id / Path(screenshot_path).name
+        check_paths.append(storage_path)
+        
+        # 4. 基于域名查找最新文件
+        screenshot_dir = Path("storage/screenshots") / self.task_id
+        if screenshot_dir.exists():
+            domain_files = list(screenshot_dir.glob(f"{domain}_*.png"))
+            if domain_files:
+                latest_file = max(domain_files, key=lambda f: f.stat().st_mtime)
+                check_paths.append(latest_file)
+        
+        # 返回第一个有效的路径
+        for path in check_paths:
+            if path.exists() and path.is_file() and path.stat().st_size > 100:
+                return path
+        
+        return None

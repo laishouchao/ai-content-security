@@ -73,8 +73,8 @@ const authStore = useAuthStore()
 // 响应式状态
 const loginFormRef = ref<FormInstance>()
 const loginForm = reactive({
-  username: 'admin',
-  password: 'admin123'
+  username: 'laisc',
+  password: 'Admin123'
 })
 
 // 表单验证规则

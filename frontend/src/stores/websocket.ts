@@ -91,7 +91,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
       status.value = WebSocketStatus.CONNECTING
       
       // 获取用户令牌用于认证
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+      const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token')
       if (!token) {
         const errorMsg = '用户未登录，无法建立 WebSocket 连接'
         console.warn('WebSocket连接失败：未找到用户令牌，请先登录')

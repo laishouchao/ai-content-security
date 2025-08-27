@@ -109,6 +109,29 @@ class CeleryConfig:
     timezone = "UTC"
     enable_utc = True
     
+    # 连接重试配置（修复连接问题）
+    broker_connection_retry_on_startup = True
+    broker_connection_retry = True
+    broker_connection_max_retries = 10
+    broker_heartbeat = 30
+    
+    # 传输选项配置（修复 "not enough values to unpack" 错误）
+    broker_transport_options = {
+        'visibility_timeout': 3600,
+        'fanout_prefix': True,
+        'fanout_patterns': True,
+        'priority_steps': list(range(10)),
+        'sep': ':',
+        'queue_order_strategy': 'priority',
+        # 移除 master_name 配置，避免 Redis Sentinel 相关错误
+    }
+    
+    # 结果后端传输选项（修复错误）
+    result_backend_transport_options = {
+        'visibility_timeout': 3600,
+        # 移除 master_name 配置
+    }
+    
     # 任务路由
     task_routes = {
         "app.tasks.scan_domain": {"queue": "scan"},
@@ -121,9 +144,12 @@ class CeleryConfig:
     worker_prefetch_multiplier = 1
     task_acks_late = True
     
+    # 内存限制（修复内存泄漏）
+    worker_max_memory_per_child = 200000  # 200MB
+    
     # 任务超时
-    task_soft_time_limit = 3600  # 1小时软限制
-    task_time_limit = 7200      # 2小时硬限制
+    task_soft_time_limit = 300  # 5分钟软限制
+    task_time_limit = 600       # 10分钟硬限制
     
     # 结果过期时间
     result_expires = 3600  # 1小时
@@ -131,3 +157,10 @@ class CeleryConfig:
     # 任务重试
     task_default_retry_delay = 60
     task_max_retries = 3
+    
+    # 错误处理配置
+    task_reject_on_worker_lost = True
+    worker_disable_rate_limits = False
+    
+    # 连接池配置
+    broker_pool_limit = 10

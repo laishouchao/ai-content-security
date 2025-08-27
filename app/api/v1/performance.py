@@ -474,18 +474,21 @@ async def get_performance_metrics(
 ):
     """获取性能指标的时间序列数据用于图表显示"""
     try:
+        # 为了避免与内置range函数冲突，立即赋值给新变量
+        time_range = range
+        
         # 生成模拟的时间序列数据
         from datetime import datetime, timedelta
         import random
         
         # 根据时间范围确定时间间隔和数据点数量
-        if range == "1h":
+        if time_range == "1h":
             interval_minutes = 5
             points = 12
-        elif range == "6h":
+        elif time_range == "6h":
             interval_minutes = 30
             points = 12
-        elif range == "24h":
+        elif time_range == "24h":
             interval_minutes = 120
             points = 12
         else:  # 7d
@@ -519,7 +522,7 @@ async def get_performance_metrics(
                 'cpu': cpu_data,
                 'memory': memory_data,
                 'disk': disk_data,
-                'range': range
+                'range': time_range
             }
         }
     except Exception as e:

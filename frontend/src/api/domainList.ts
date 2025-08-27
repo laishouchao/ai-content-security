@@ -85,17 +85,17 @@ export const domainListAPI = {
     skip?: number
     limit?: number
   } = {}) => {
-    return http.get('/api/v1/domain-lists', { params })
+    return http.get('/domain-lists', { params })
   },
 
   // 获取域名列表详情
   getDomainList: (listId: string) => {
-    return http.get(`/api/v1/domain-lists/${listId}`)
+    return http.get(`/domain-lists/${listId}`)
   },
 
   // 获取域名列表详情（别名）
   getDomainListDetail: (listId: string) => {
-    return http.get(`/api/v1/domain-lists/${listId}`)
+    return http.get(`/domain-lists/${listId}`)
   },
 
   // 获取域名列表中的域名
@@ -103,37 +103,37 @@ export const domainListAPI = {
     skip?: number
     limit?: number
   } = {}) => {
-    return http.get(`/api/v1/domain-lists/${listId}/entries`, { params })
+    return http.get(`/domain-lists/${listId}/entries`, { params })
   },
 
   // 创建域名列表
   createDomainList: (data: CreateDomainListRequest) => {
-    return http.post('/api/v1/domain-lists', data)
+    return http.post('/domain-lists', data)
   },
 
   // 更新域名列表
   updateDomainList: (listId: string, data: CreateDomainListRequest) => {
-    return http.put(`/api/v1/domain-lists/${listId}`, data)
+    return http.put(`/domain-lists/${listId}`, data)
   },
 
   // 删除域名列表
   deleteDomainList: (listId: string) => {
-    return http.delete(`/api/v1/domain-lists/${listId}`)
+    return http.delete(`/domain-lists/${listId}`)
   },
 
   // 添加域名条目
   addDomainEntry: (listId: string, data: CreateDomainEntryRequest) => {
-    return http.post(`/api/v1/domain-lists/${listId}/entries`, data)
+    return http.post(`/domain-lists/${listId}/entries`, data)
   },
 
   // 删除域名条目
   removeDomainEntry: (entryId: string) => {
-    return http.delete(`/api/v1/domain-lists/entries/${entryId}`)
+    return http.delete(`/domain-lists/entries/${entryId}`)
   },
 
   // 从列表中删除域名
   deleteDomainFromList: (listId: string, entryId: string) => {
-    return http.delete(`/api/v1/domain-lists/${listId}/entries/${entryId}`)
+    return http.delete(`/domain-lists/${listId}/entries/${entryId}`)
   },
 
   // 在列表中添加域名
@@ -142,7 +142,7 @@ export const domainListAPI = {
     is_regex?: boolean
     notes?: string
   }) => {
-    return http.post(`/api/v1/domain-lists/${listId}/entries`, {
+    return http.post(`/domain-lists/${listId}/entries`, {
       domain_pattern: data.domain,
       description: data.notes,
       is_regex: data.is_regex || false
@@ -155,7 +155,7 @@ export const domainListAPI = {
     is_regex?: boolean
     notes?: string
   }) => {
-    return http.put(`/api/v1/domain-lists/${listId}/entries/${entryId}`, {
+    return http.put(`/domain-lists/${listId}/entries/${entryId}`, {
       domain_pattern: data.domain,
       description: data.notes,
       is_regex: data.is_regex || false
@@ -170,7 +170,7 @@ export const domainListAPI = {
       notes?: string
     }>
   }) => {
-    return http.post(`/api/v1/domain-lists/${listId}/batch-add`, {
+    return http.post(`/domain-lists/${listId}/batch-add`, {
       domain_patterns: data.domains.map(d => d.domain),
       entries: data.domains.map(d => ({
         domain_pattern: d.domain,
@@ -182,14 +182,14 @@ export const domainListAPI = {
 
   // 批量添加域名
   batchAddDomains: (listId: string, data: BatchAddDomainsRequest) => {
-    return http.post(`/api/v1/domain-lists/${listId}/batch-add`, data)
+    return http.post(`/domain-lists/${listId}/batch-add`, data)
   },
 
   // CSV导入域名
   importDomainsFromCSV: (listId: string, file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-    return http.post(`/api/v1/domain-lists/${listId}/import-csv`, formData, {
+    return http.post(`/domain-lists/${listId}/import-csv`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
@@ -198,12 +198,12 @@ export const domainListAPI = {
 
   // 检查域名
   checkDomains: (data: DomainCheckRequest) => {
-    return http.post('/api/v1/domain-lists/check', data)
+    return http.post('/domain-lists/check', data)
   },
 
   // 导出域名列表
   exportDomainList: (listId: string, format: 'json' | 'csv' | 'excel') => {
-    return http.get(`/api/v1/domain-lists/${listId}/export`, {
+    return http.get(`/domain-lists/${listId}/export`, {
       params: { format },
       responseType: 'blob'
     })

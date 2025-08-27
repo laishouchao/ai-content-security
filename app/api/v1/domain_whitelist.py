@@ -18,7 +18,7 @@ from app.services.domain_list_service import DomainListService, DomainMatcherSer
 from app.core.logging import logger
 
 
-router = APIRouter(prefix="/domain-lists", tags=["域名列表管理"])
+router = APIRouter(tags=["域名列表管理"])
 
 
 # Pydantic模型定义
@@ -103,18 +103,18 @@ async def create_domain_list(
         
         return DomainListResponse(
             id=str(domain_list.id),
-            name=domain_list.name,
-            description=domain_list.description,
-            list_type=domain_list.list_type,
-            scope=domain_list.scope,
-            is_active=domain_list.is_active,
-            is_regex_enabled=domain_list.is_regex_enabled,
-            priority=domain_list.priority,
-            domain_count=domain_list.domain_count,
-            match_count=domain_list.match_count,
-            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at else None,
-            created_at=domain_list.created_at.isoformat(),
-            updated_at=domain_list.updated_at.isoformat()
+            name=domain_list.name,  # type: ignore
+            description=domain_list.description,  # type: ignore
+            list_type=domain_list.list_type,  # type: ignore
+            scope=domain_list.scope,  # type: ignore
+            is_active=domain_list.is_active,  # type: ignore
+            is_regex_enabled=domain_list.is_regex_enabled,  # type: ignore
+            priority=domain_list.priority,  # type: ignore
+            domain_count=domain_list.domain_count,  # type: ignore
+            match_count=domain_list.match_count,  # type: ignore
+            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at is not None else None,  # type: ignore
+            created_at=domain_list.created_at.isoformat(),  # type: ignore
+            updated_at=domain_list.updated_at.isoformat()  # type: ignore
         )
         
     except ValidationError as e:
@@ -150,18 +150,18 @@ async def get_domain_lists(
         for domain_list in domain_lists:
             items.append(DomainListResponse(
                 id=str(domain_list.id),
-                name=domain_list.name,
-                description=domain_list.description,
-                list_type=domain_list.list_type,
-                scope=domain_list.scope,
-                is_active=domain_list.is_active,
-                is_regex_enabled=domain_list.is_regex_enabled,
-                priority=domain_list.priority,
-                domain_count=domain_list.domain_count,
-                match_count=domain_list.match_count,
-                last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at else None,
-                created_at=domain_list.created_at.isoformat(),
-                updated_at=domain_list.updated_at.isoformat()
+                name=domain_list.name,  # type: ignore
+                description=domain_list.description,  # type: ignore
+                list_type=domain_list.list_type,  # type: ignore
+                scope=domain_list.scope,  # type: ignore
+                is_active=domain_list.is_active,  # type: ignore
+                is_regex_enabled=domain_list.is_regex_enabled,  # type: ignore
+                priority=domain_list.priority,  # type: ignore
+                domain_count=domain_list.domain_count,  # type: ignore
+                match_count=domain_list.match_count,  # type: ignore
+                last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at is not None else None,  # type: ignore
+                created_at=domain_list.created_at.isoformat(),  # type: ignore
+                updated_at=domain_list.updated_at.isoformat()  # type: ignore
             ))
         
         return {
@@ -196,18 +196,18 @@ async def get_domain_list(
         # 构建响应
         list_data = DomainListResponse(
             id=str(domain_list.id),
-            name=domain_list.name,
-            description=domain_list.description,
-            list_type=domain_list.list_type,
-            scope=domain_list.scope,
-            is_active=domain_list.is_active,
-            is_regex_enabled=domain_list.is_regex_enabled,
-            priority=domain_list.priority,
-            domain_count=domain_list.domain_count,
-            match_count=domain_list.match_count,
-            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at else None,
-            created_at=domain_list.created_at.isoformat(),
-            updated_at=domain_list.updated_at.isoformat()
+            name=domain_list.name,  # type: ignore
+            description=domain_list.description,  # type: ignore
+            list_type=domain_list.list_type,  # type: ignore
+            scope=domain_list.scope,  # type: ignore
+            is_active=domain_list.is_active,  # type: ignore
+            is_regex_enabled=domain_list.is_regex_enabled,  # type: ignore
+            priority=domain_list.priority,  # type: ignore
+            domain_count=domain_list.domain_count,  # type: ignore
+            match_count=domain_list.match_count,  # type: ignore
+            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at is not None else None,  # type: ignore
+            created_at=domain_list.created_at.isoformat(),  # type: ignore
+            updated_at=domain_list.updated_at.isoformat()  # type: ignore
         )
         
         # 包含域名条目
@@ -215,17 +215,17 @@ async def get_domain_list(
         for entry in domain_list.domains:
             entries.append(DomainEntryResponse(
                 id=str(entry.id),
-                domain_pattern=entry.domain_pattern,
-                description=entry.description,
-                is_regex=entry.is_regex,
-                is_wildcard=entry.is_wildcard,
-                tags=entry.tags or [],
-                confidence_score=entry.confidence_score,
-                match_count=entry.match_count,
-                last_matched_at=entry.last_matched_at.isoformat() if entry.last_matched_at else None,
-                last_matched_domain=entry.last_matched_domain,
-                is_active=entry.is_active,
-                created_at=entry.created_at.isoformat()
+                domain_pattern=entry.domain_pattern,  # type: ignore
+                description=entry.description,  # type: ignore
+                is_regex=entry.is_regex,  # type: ignore
+                is_wildcard=entry.is_wildcard,  # type: ignore
+                tags=entry.tags or [],  # type: ignore
+                confidence_score=entry.confidence_score,  # type: ignore
+                match_count=entry.match_count,  # type: ignore
+                last_matched_at=entry.last_matched_at.isoformat() if entry.last_matched_at is not None else None,  # type: ignore
+                last_matched_domain=entry.last_matched_domain,  # type: ignore
+                is_active=entry.is_active,  # type: ignore
+                created_at=entry.created_at.isoformat()  # type: ignore
             ))
         
         return {
@@ -264,18 +264,18 @@ async def update_domain_list(
         
         return DomainListResponse(
             id=str(domain_list.id),
-            name=domain_list.name,
-            description=domain_list.description,
-            list_type=domain_list.list_type,
-            scope=domain_list.scope,
-            is_active=domain_list.is_active,
-            is_regex_enabled=domain_list.is_regex_enabled,
-            priority=domain_list.priority,
-            domain_count=domain_list.domain_count,
-            match_count=domain_list.match_count,
-            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at else None,
-            created_at=domain_list.created_at.isoformat(),
-            updated_at=domain_list.updated_at.isoformat()
+            name=domain_list.name,  # type: ignore
+            description=domain_list.description,  # type: ignore
+            list_type=domain_list.list_type,  # type: ignore
+            scope=domain_list.scope,  # type: ignore
+            is_active=domain_list.is_active,  # type: ignore
+            is_regex_enabled=domain_list.is_regex_enabled,  # type: ignore
+            priority=domain_list.priority,  # type: ignore
+            domain_count=domain_list.domain_count,  # type: ignore
+            match_count=domain_list.match_count,  # type: ignore
+            last_matched_at=domain_list.last_matched_at.isoformat() if domain_list.last_matched_at is not None else None,  # type: ignore
+            created_at=domain_list.created_at.isoformat(),  # type: ignore
+            updated_at=domain_list.updated_at.isoformat()  # type: ignore
         )
         
     except (ValidationError, NotFoundError) as e:
@@ -328,17 +328,17 @@ async def add_domain_entry(
         
         return DomainEntryResponse(
             id=str(entry.id),
-            domain_pattern=entry.domain_pattern,
-            description=entry.description,
-            is_regex=entry.is_regex,
-            is_wildcard=entry.is_wildcard,
-            tags=entry.tags or [],
-            confidence_score=entry.confidence_score,
-            match_count=entry.match_count,
-            last_matched_at=entry.last_matched_at.isoformat() if entry.last_matched_at else None,
-            last_matched_domain=entry.last_matched_domain,
-            is_active=entry.is_active,
-            created_at=entry.created_at.isoformat()
+            domain_pattern=entry.domain_pattern,  # type: ignore
+            description=entry.description,  # type: ignore
+            is_regex=entry.is_regex,  # type: ignore
+            is_wildcard=entry.is_wildcard,  # type: ignore
+            tags=entry.tags or [],  # type: ignore
+            confidence_score=entry.confidence_score,  # type: ignore
+            match_count=entry.match_count,  # type: ignore
+            last_matched_at=entry.last_matched_at.isoformat() if entry.last_matched_at is not None else None,  # type: ignore
+            last_matched_domain=entry.last_matched_domain,  # type: ignore
+            is_active=entry.is_active,  # type: ignore
+            created_at=entry.created_at.isoformat()  # type: ignore
         )
         
     except (ValidationError, NotFoundError) as e:
@@ -404,7 +404,7 @@ async def import_domains_from_csv(
 ):
     """从CSV文件导入域名"""
     try:
-        if not file.filename.endswith('.csv'):
+        if not file.filename or not file.filename.endswith('.csv'):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只支持CSV文件")
         
         # 读取CSV内容

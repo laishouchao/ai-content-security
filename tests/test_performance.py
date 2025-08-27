@@ -43,8 +43,8 @@ class PerformanceTester:
                 async with session.post(
                     f"{self.base_url}/api/v1/auth/login",
                     json={
-                        "username": "admin",
-                        "password": "admin123"
+                        "username": "laisc",
+                        "password": "Admin123"
                     }
                 ) as response:
                     if response.status == 200:
@@ -176,8 +176,8 @@ class PerformanceTester:
             "POST",
             "/api/v1/auth/login",
             data={
-                "username": "admin",
-                "password": "admin123"
+                "username": "laisc",
+                "password": "Admin123"
             },
             concurrent_users=10,
             requests_per_user=10

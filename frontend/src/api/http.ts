@@ -33,7 +33,7 @@ http.interceptors.request.use(
     // 添加请求ID用于调试
     config.headers['X-Request-ID'] = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
-    console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.url}`, config.data)
+    console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.baseURL || ''}${config.url || ''}`, config.data)
     
     return config
   },
@@ -48,7 +48,7 @@ http.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     const { data } = response
     
-    console.log(`✅ API响应: ${response.config.method?.toUpperCase()} ${response.config.url}`, data)
+    console.log(`✅ API响应: ${response.config.method?.toUpperCase()} ${response.config.baseURL || ''}${response.config.url || ''}`, data)
     
     // 检查业务状态码
     if (data && typeof data === 'object') {
