@@ -238,19 +238,38 @@ class ParallelScanExecutor:
                 elif isinstance(result, Exception):
                     self.logger.warning(f"子域名发现异常: {result}")
             
-            self.results['subdomains'] = list(all_subdomains)
+            # 转换为列表以便后续处理
+            subdomain_list = list(all_subdomains)
+            
+            # 🔧 关键修复：添加可访问性验证
+            if subdomain_list and config.get('verify_accessibility', True):
+                self.logger.info(f"开始验证 {len(subdomain_list)} 个子域名的可访问性...")
+                
+                # 使用子域名发现引擎的可访问性验证方法
+                verified_subdomains = await self.subdomain_engine._verify_accessibility(subdomain_list)
+                self.results['subdomains'] = verified_subdomains
+                
+                # 统计可访问的子域名
+                accessible_count = sum(1 for sub in verified_subdomains if sub.is_accessible)
+                self.logger.info(f"可访问性验证完成: {accessible_count}/{len(verified_subdomains)} 个子域名可访问")
+            else:
+                # 如果跳过验证，直接使用发现结果
+                self.results['subdomains'] = subdomain_list
+                self.logger.warning("跳过可访问性验证")
             
             await self.event_store.emit(
                 PipelineStage.DISCOVERY,
                 'subdomains_discovered',
                 {
-                    'count': len(all_subdomains),
-                    'domains': [sub.subdomain for sub in all_subdomains][:10]  # 前10个
+                    'count': len(self.results['subdomains']),
+                    'domains': [sub.subdomain for sub in self.results['subdomains']][:10]  # 前10个
                 }
             )
             
             # 将可访问的子域名发送到爬取轨
-            accessible_subdomains = [sub for sub in all_subdomains if sub.is_accessible]
+            accessible_subdomains = [sub for sub in self.results['subdomains'] if sub.is_accessible]
+            self.logger.info(f"发送 {len(accessible_subdomains)} 个可访问子域名到爬取轨")
+            
             for subdomain in accessible_subdomains:
                 await self.discovery_to_crawl.put(subdomain)
             
@@ -355,7 +374,7 @@ class ParallelScanExecutor:
                 try:
                     # 第三方域名识别
                     third_party_domains = await self.identifier_engine.identify_third_party_domains(
-                        [crawl_result], config
+                        crawl_result.domain, [crawl_result], config
                     )
                     self.results['third_party_domains'].extend(third_party_domains)
                     
@@ -446,8 +465,18 @@ class ParallelScanExecutor:
         """增强的子域名爬取"""
         max_pages = config.get('max_pages_per_subdomain', 20)
         
-        return await self.crawler_engine.crawl_subdomain_enhanced(
-            subdomain.subdomain, max_pages
+        # 构建起始URL列表
+        start_urls = [
+            f"https://{subdomain.subdomain}",
+            f"http://{subdomain.subdomain}"
+        ]
+        
+        # 使用实际存在的crawl_domain方法
+        crawl_config = config.copy()
+        crawl_config['max_pages_per_domain'] = max_pages
+        
+        return await self.crawler_engine.crawl_domain(
+            subdomain.subdomain, start_urls, crawl_config
         )
     
     async def _should_analyze_with_ai(self, content_result: ContentResult) -> Tuple[bool, str]:
@@ -477,7 +506,7 @@ class ParallelScanExecutor:
                 return True, f"suspicious_pattern_{pattern}"
         
         # 检查状态码
-        if hasattr(content_result, 'status_code') and content_result.status_code >= 400:
+        if hasattr(content_result, 'status_code') and content_result.status_code is not None and content_result.status_code >= 400:
             return False, "error_status_code"
         
         # 默认：随机采样策略（降低AI调用）
@@ -498,10 +527,33 @@ class ParallelScanExecutor:
                 ai_config = await db.get(UserAIConfig, self.user_id)
                 if ai_config:
                     from app.engines.ai_analysis import AIAnalysisEngine
-                    self.ai_engine = AIAnalysisEngine(self.task_id, self.user_id)
+                    self.ai_engine = AIAnalysisEngine(self.task_id, ai_config)
         
         if self.ai_engine:
-            return await self.ai_engine.analyze_single_content(content_result)
+            # 由于AIAnalysisEngine.analyze_domains需要ThirdPartyDomain对象列表
+            # 我们需要创建一个临时的域名对象来进行分析
+            from app.models.task import ThirdPartyDomain
+            from urllib.parse import urlparse
+            
+            # 从content_result.url解析域名
+            parsed_url = urlparse(content_result.url)
+            domain_name = parsed_url.netloc
+            
+            # 创建临时的ThirdPartyDomain对象
+            temp_domain = ThirdPartyDomain(
+                task_id=self.task_id,
+                domain=domain_name,
+                found_on_url=content_result.url,
+                screenshot_path=content_result.screenshot_path,
+                page_title=getattr(content_result, 'page_title', ''),
+                page_description=getattr(content_result, 'page_description', ''),
+                domain_type='unknown',
+                is_analyzed=False
+            )
+            
+            # 调用analyze_domains方法
+            violations = await self.ai_engine.analyze_domains([temp_domain])
+            return violations
         else:
             return []
     

@@ -62,7 +62,7 @@ class TaskConfigSchema(BaseModel):
         return v
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "subdomain_discovery_enabled": True,
                 "link_crawling_enabled": True,
@@ -101,7 +101,7 @@ class CreateTaskSchema(BaseModel):
         return v.lower()
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "target_domain": "example.com",
                 "task_name": "示例域名安全扫描",
@@ -185,7 +185,7 @@ class TaskConfigPresetSchema(BaseModel):
     config: TaskConfigSchema = Field(..., description="配置内容")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "快速扫描",
                 "description": "适合日常安全检查的快速扫描配置",

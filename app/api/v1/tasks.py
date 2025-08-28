@@ -86,7 +86,7 @@ async def get_task_stats(
         )
 
 
-@router.post("", response_model=TaskResponseSchema)
+@router.post("")
 async def create_scan_task(
     task_data: CreateTaskSchema,
     current_user: User = Depends(get_current_user),
@@ -201,7 +201,7 @@ async def create_scan_task(
         )
 
 
-@router.get("", response_model=TaskListResponseSchema)
+@router.get("")
 async def get_scan_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),

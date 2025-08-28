@@ -1,5 +1,6 @@
 import asyncio
 import aiohttp
+import asyncio
 import dns.resolver
 import dns.exception
 import re
@@ -109,7 +110,7 @@ class MultiSourceCertificateMethod:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     
-    async def discover_multi_source(self, domain: str, logger: TaskLogger, sources: List[str] = None) -> List[SubdomainResult]:
+    async def discover_multi_source(self, domain: str, logger: TaskLogger, sources: Optional[List[str]] = None) -> List[SubdomainResult]:
         """多源并发证书透明日志查询"""
         if sources is None:
             sources = ['crt_sh', 'censys', 'facebook_ct']
@@ -257,6 +258,25 @@ class MultiSourceCertificateMethod:
             return True
         except:
             return False
+
+
+class CertificateTransparencyMethod:
+    """证书透明度日志查询方法（兼容性包装）"""
+    
+    def __init__(self):
+        self.multi_source_method = MultiSourceCertificateMethod()
+    
+    async def discover(self, domain: str, logger: TaskLogger) -> List[SubdomainResult]:
+        """通过证书透明度日志发现子域名"""
+        try:
+            # 使用多源证书方法，但只使用crt.sh源以保持兼容性
+            results = await self.multi_source_method.discover_multi_source(
+                domain, logger, sources=['crt_sh']
+            )
+            return results
+        except Exception as e:
+            logger.error(f"证书透明度查询失败: {e}")
+            return []
 
 
 class BruteForceMethod:
@@ -431,18 +451,38 @@ class SubdomainDiscoveryEngine:
     
     async def _verify_accessibility(self, results: List[SubdomainResult]) -> List[SubdomainResult]:
         """验证子域名的可访问性"""
+        if not results:
+            return results
+            
         self.logger.info(f"开始验证 {len(results)} 个子域名的可访问性")
         
-        # 限制并发数
-        semaphore = asyncio.Semaphore(20)
+        # 降低并发数，避免网络拥塞
+        semaphore = asyncio.Semaphore(5)  # 从20降低到5
+        completed_count = 0
         
-        async def _check_accessibility(result: SubdomainResult):
+        async def _check_accessibility_with_progress(result: SubdomainResult):
+            nonlocal completed_count
             async with semaphore:
-                await self._check_http_accessibility(result)
-                return result
+                try:
+                    await self._check_http_accessibility(result)
+                    completed_count += 1
+                    
+                    # 每处理5个或在最后输出进度
+                    if completed_count % 5 == 0 or completed_count == len(results):
+                        accessible_so_far = sum(1 for r in results[:completed_count] if r.is_accessible)
+                        self.logger.info(
+                            f"可访问性验证进度: {completed_count}/{len(results)}, "
+                            f"已发现可访问: {accessible_so_far}"
+                        )
+                    
+                    return result
+                except Exception as e:
+                    self.logger.warning(f"验证子域名可访问性时出错 {result.subdomain}: {e}")
+                    result.is_accessible = False
+                    return result
         
         # 并发检查可访问性
-        tasks = [_check_accessibility(result) for result in results]
+        tasks = [_check_accessibility_with_progress(result) for result in results]
         verified_results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # 过滤异常结果
@@ -451,10 +491,17 @@ class SubdomainDiscoveryEngine:
             if isinstance(result, SubdomainResult):
                 valid_results.append(result)
             elif isinstance(result, Exception):
-                self.logger.debug(f"可访问性检查异常: {result}")
+                self.logger.warning(f"可访问性检查异常: {result}")
         
         accessible_count = sum(1 for r in valid_results if r.is_accessible)
-        self.logger.info(f"可访问性验证完成: {accessible_count}/{len(valid_results)} 个子域名可访问")
+        self.logger.info(
+            f"✅ 可访问性验证完成: {accessible_count}/{len(valid_results)} 个子域名可访问"
+        )
+        
+        # 输出可访问的子域名列表
+        accessible_domains = [r.subdomain for r in valid_results if r.is_accessible]
+        if accessible_domains:
+            self.logger.info(f"可访问的子域名: {', '.join(accessible_domains[:10])}{'...' if len(accessible_domains) > 10 else ''}")
         
         return valid_results
     
@@ -462,33 +509,95 @@ class SubdomainDiscoveryEngine:
         """检查HTTP可访问性"""
         start_time = time.time()
         
+        # 定义请求头，模拟真实浏览器访问
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
+        # 多种协议和端口组合
         urls_to_check = [
             f"https://{result.subdomain}",
-            f"http://{result.subdomain}"
+            f"http://{result.subdomain}",
+            f"https://{result.subdomain}:443",
+            f"http://{result.subdomain}:80"
         ]
         
+        # 创建更宽松的连接配置
+        connector = aiohttp.TCPConnector(
+            ssl=False,  # 忽略SSL证书验证
+            limit=10,
+            limit_per_host=2,
+            enable_cleanup_closed=True
+        )
+        
+        # 增加超时时间，分别设置连接和总超时
+        timeout = aiohttp.ClientTimeout(
+            total=30,      # 总超时30秒
+            connect=10,    # 连接超时10秒
+            sock_read=15   # 读取超时15秒
+        )
+        
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
-            connector=aiohttp.TCPConnector(ssl=False)
+            timeout=timeout,
+            connector=connector,
+            headers=headers
         ) as session:
             
             for url in urls_to_check:
-                try:
-                    async with session.get(url, allow_redirects=True) as response:
-                        result.is_accessible = True
-                        result.response_code = response.status
-                        result.response_time = time.time() - start_time
-                        result.server_header = response.headers.get('Server', '')
+                # 每个URL尝试最多3次
+                for attempt in range(3):
+                    try:
+                        self.logger.debug(f"尝试访问 {url} (第{attempt+1}次)")
                         
-                        self.logger.debug(f"子域名可访问: {result.subdomain} ({response.status})")
+                        async with session.get(
+                            url, 
+                            allow_redirects=True,
+                            ssl=False  # 忽略SSL验证
+                        ) as response:
+                            
+                            # 认为2xx和3xx状态码都是可访问的
+                            if 200 <= response.status < 400:
+                                result.is_accessible = True
+                                result.response_code = response.status
+                                result.response_time = time.time() - start_time
+                                result.server_header = response.headers.get('Server', '')
+                                
+                                self.logger.info(f"✅ 子域名可访问: {result.subdomain} - {url} ({response.status})")
+                                return
+                            else:
+                                self.logger.debug(f"HTTP状态码异常: {url} - {response.status}")
+                        
+                    except asyncio.TimeoutError:
+                        self.logger.debug(f"访问超时: {url} (第{attempt+1}次)")
+                        if attempt < 2:  # 不是最后一次尝试
+                            await asyncio.sleep(1)  # 等待1秒后重试
+                        continue
+                        
+                    except aiohttp.ClientError as e:
+                        self.logger.debug(f"客户端错误: {url} - {type(e).__name__}: {str(e)}")
+                        if attempt < 2:
+                            await asyncio.sleep(1)
+                        continue
+                        
+                    except Exception as e:
+                        self.logger.debug(f"访问异常: {url} - {type(e).__name__}: {str(e)}")
+                        if attempt < 2:
+                            await asyncio.sleep(1)
+                        continue
+                    
+                    # 如果成功访问，跳出重试循环
+                    if result.is_accessible:
                         return
-                        
-                except Exception:
-                    continue
         
-        # 如果都无法访问，记录为不可访问
+        # 如果所有尝试都失败，记录为不可访问
         result.is_accessible = False
         result.response_time = time.time() - start_time
+        self.logger.debug(f"❌ 子域名不可访问: {result.subdomain} (尝试了所有URL和重试)")
     
     # 新增高性能方法
     async def discover_dns_with_concurrency(self, domain: str, concurrency: int = 100, timeout: int = 3) -> List[SubdomainResult]:
@@ -496,9 +605,9 @@ class SubdomainDiscoveryEngine:
         try:
             self.logger.info(f"开始高并发DNS发现: {domain}, 并发数: {concurrency}")
             
-            # 使用增强的DNS查询方法
-            enhanced_dns = EnhancedDNSQueryMethod(concurrency)
-            results = await enhanced_dns.discover_with_concurrency(domain, self.logger, concurrency)
+            # 使用基本DNS查询方法作为替代
+            dns_method = DNSQueryMethod()
+            results = await dns_method.discover(domain, self.logger)
             
             self.logger.info(f"高并发DNS发现完成: {len(results)} 个子域名")
             return results
@@ -507,7 +616,7 @@ class SubdomainDiscoveryEngine:
             self.logger.error(f"高并发DNS发现失败: {e}")
             return []
     
-    async def discover_certificate_multi_source(self, domain: str, sources: List[str] = None) -> List[SubdomainResult]:
+    async def discover_certificate_multi_source(self, domain: str, sources: Optional[List[str]] = None) -> List[SubdomainResult]:
         """多源证书透明日志发现"""
         try:
             self.logger.info(f"开始多源证书透明日志发现: {domain}")
@@ -527,8 +636,9 @@ class SubdomainDiscoveryEngine:
         try:
             self.logger.info(f"开始被动DNS发现: {domain}")
             
-            passive_dns_method = PassiveDNSMethod()
-            results = await passive_dns_method.discover_passive_dns(domain, self.logger)
+            # 暂时使用证书透明度方法作为被动DNS替代
+            ct_method = CertificateTransparencyMethod()
+            results = await ct_method.discover(domain, self.logger)
             
             self.logger.info(f"被动DNS发现完成: {len(results)} 个子域名")
             return results

@@ -31,7 +31,9 @@ async def _check_task_exists(task_id: str, max_retries: int = 5, retry_delay: fl
             if redis_check:
                 # Redis中有创建标记，再检查数据库
                 from sqlalchemy import select
-                async with AsyncSessionLocal() as db:
+                from app.core.database import get_db_session
+                
+                async with get_db_session() as db:
                     stmt = select(ScanTask.id).where(ScanTask.id == task_id)
                     result = await db.execute(stmt)
                     exists = result.scalar_one_or_none() is not None
@@ -43,7 +45,9 @@ async def _check_task_exists(task_id: str, max_retries: int = 5, retry_delay: fl
             else:
                 # Redis中没有标记，直接检查数据库
                 from sqlalchemy import select
-                async with AsyncSessionLocal() as db:
+                from app.core.database import get_db_session
+                
+                async with get_db_session() as db:
                     stmt = select(ScanTask.id).where(ScanTask.id == task_id)
                     result = await db.execute(stmt)
                     exists = result.scalar_one_or_none() is not None
@@ -130,7 +134,10 @@ async def _execute_scan_task(
     logger = TaskLogger(task_id, user_id)
     logger.info(f"开始执行扫描任务: {target_domain}")
     
-    async with AsyncSessionLocal() as db:
+    # 在Celery任务中使用专用的数据库会话
+    from app.core.database import get_db_session
+    
+    async with get_db_session() as db:
         try:
             # 更新任务状态为运行中
             await _update_task_status(db, task_id, TaskStatus.RUNNING, 0, "开始扫描")
@@ -151,8 +158,10 @@ async def _execute_scan_task(
             # 设置进度回调（仅对传统执行器）
             if isinstance(executor, ScanTaskExecutor):
                 async def progress_callback(task_id: str, progress: int, message: str):
-                    await _update_task_status(db, task_id, TaskStatus.RUNNING, progress, message)
-                    await _log_task_event(db, task_id, "INFO", "progress", message)
+                    # 在回调中使用新的数据库会话
+                    async with get_db_session() as callback_db:
+                        await _update_task_status(callback_db, task_id, TaskStatus.RUNNING, progress, message)
+                        await _log_task_event(callback_db, task_id, "INFO", "progress", message)
                     # 实时通知已在scan_executor中处理
                 
                 executor.set_progress_callback(progress_callback)
@@ -168,7 +177,7 @@ async def _execute_scan_task(
                 
                 executor.event_store.subscribe(event_handler)
             
-            # 执行扫描
+            # 执行扫描（不使用数据库会话）
             if isinstance(executor, ParallelScanExecutor):
                 # 并行执行器返回完整结果
                 scan_result_dict = await executor.execute_scan(target_domain, config)
