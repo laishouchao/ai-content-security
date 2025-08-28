@@ -283,57 +283,86 @@ class ContentCaptureEngine:
     ) -> List[ContentResult]:
         """抓取域名内容"""
         start_time = time.time()
-        self.logger.info(f"开始抓取域名内容: {domain}, {len(urls)} 个URL")
+        self.logger.info(f"🚀 开始抓取域名内容: {domain}, {len(urls)} 个URL")
         
         results = []
         max_captures = config.get('max_captures_per_domain', 50)
         capture_screenshots = config.get('capture_screenshots', True)
         
+        self.logger.info(f"📸 截图配置: capture_screenshots={capture_screenshots}")
+        
         # 限制抓取数量
         urls_to_capture = urls[:max_captures]
+        self.logger.info(f"📋 准备抓取 {len(urls_to_capture)} 个URL")
         
         # 使用优化的截图服务
         if capture_screenshots:
-            async with OptimizedScreenshotService(self.task_id, self.user_id) as optimized_service:
-                # 提取域名列表，每个域名只截图一张
-                unique_domains = list(set([urlparse(url).netloc for url in urls_to_capture]))
+            try:
+                self.logger.info("🔧 初始化优化截图服务...")
+                async with OptimizedScreenshotService(self.task_id, self.user_id) as optimized_service:
+                    # 提取域名列表，每个域名只截图一张
+                    unique_domains = list(set([urlparse(url).netloc for url in urls_to_capture]))
+                    self.logger.info(f"🌐 发现 {len(unique_domains)} 个唯一域名: {unique_domains}")
+                    
+                    # 优化截图
+                    self.logger.info("📸 开始批量截图...")
+                    screenshot_results = await optimized_service.capture_domains_optimized(
+                        unique_domains, config
+                    )
+                    
+                    self.logger.info(f"📊 截图结果: {len(screenshot_results)} 个")
+                    
+                    # 转换为ContentResult格式
+                    for i, screenshot_result in enumerate(screenshot_results):
+                        self.logger.debug(f"处理截图结果 {i+1}/{len(screenshot_results)}: {screenshot_result.domain}")
+                        
+                        if screenshot_result.success:
+                            content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
+                            content_result.screenshot_path = screenshot_result.screenshot_path
+                            content_result.html_content = screenshot_result.text_content  # 使用提取的文本
+                            content_result.page_title = screenshot_result.page_title
+                            content_result.meta_description = screenshot_result.page_description
+                            content_result.text_content = screenshot_result.text_content
+                            content_result.set_content_hash(screenshot_result.text_content)
+                            content_result.file_size = screenshot_result.file_size
+                            content_result.status_code = 200
+                            content_result.capture_duration = time.time() - start_time
+                            
+                            self.logger.info(f"✅ 成功抓取: {screenshot_result.domain} - 截图路径: {screenshot_result.screenshot_path}")
+                            results.append(content_result)
+                            self.captured_count += 1
+                        else:
+                            # 为失败的域名创建错误结果
+                            content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
+                            content_result.error_message = screenshot_result.error_message
+                            content_result.status_code = 500
+                            
+                            self.logger.warning(f"❌ 抓取失败: {screenshot_result.domain} - 错误: {screenshot_result.error_message}")
+                            results.append(content_result)
+                            self.failed_count += 1
+                            
+            except Exception as e:
+                self.logger.error(f"💥 截图服务异常: {e}")
+                import traceback
+                self.logger.error(f"错误堆栈: {traceback.format_exc()}")
                 
-                # 优化截图
-                screenshot_results = await optimized_service.capture_domains_optimized(
-                    unique_domains, config
+                # 如果截图服务失败，尝试不截图的方式
+                self.logger.info("🔄 截图服务失败，尝试不截图的方式...")
+                results = await self._capture_without_screenshots(
+                    urls_to_capture, domain, config
                 )
-                
-                # 转换为ContentResult格式
-                for screenshot_result in screenshot_results:
-                    if screenshot_result.success:
-                        content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
-                        content_result.screenshot_path = screenshot_result.screenshot_path
-                        content_result.html_content = screenshot_result.text_content  # 使用提取的文本
-                        content_result.page_title = screenshot_result.page_title
-                        content_result.meta_description = screenshot_result.page_description
-                        content_result.text_content = screenshot_result.text_content
-                        content_result.set_content_hash(screenshot_result.text_content)
-                        content_result.file_size = screenshot_result.file_size
-                        content_result.status_code = 200
-                        content_result.capture_duration = time.time() - start_time
-                        
-                        results.append(content_result)
-                        self.captured_count += 1
-                    else:
-                        # 为失败的域名创建错误结果
-                        content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
-                        content_result.error_message = screenshot_result.error_message
-                        content_result.status_code = 500
-                        
-                        results.append(content_result)
-                        self.failed_count += 1
         else:
+            self.logger.info("📝 仅抓取内容，不截图")
             results = await self._capture_without_screenshots(
                 urls_to_capture, domain, config
             )
         
         duration = time.time() - start_time
-        self.logger.info(f"域名内容抓取完成: 成功 {self.captured_count}, 失败 {self.failed_count}, 耗时 {duration:.2f} 秒")
+        self.logger.info(f"🏁 域名内容抓取完成: 成功 {self.captured_count}, 失败 {self.failed_count}, 耗时 {duration:.2f} 秒")
+        
+        # 输出详细的结果统计
+        for result in results:
+            self.logger.debug(f"结果详情: {result.domain} - 截图路径: {result.screenshot_path} - 状态: {result.status_code}")
         
         return results
     

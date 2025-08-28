@@ -50,7 +50,7 @@
       </el-form-item>
 
       <el-form-item label="高风险违规阈值">
-        <el-select v-model="config.high_risk_threshold">
+        <el-select v-model="config.high_risk_threshold" style="width: 60px">
           <el-option label="立即通知" value="immediate" />
           <el-option label="1小时内累计5个" value="5_per_hour" />
           <el-option label="1天内累计10个" value="10_per_day" />

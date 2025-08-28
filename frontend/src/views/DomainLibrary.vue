@@ -99,7 +99,7 @@
         </el-form-item>
         
         <el-form-item label="域名类型">
-          <el-select v-model="filters.domain_type" placeholder="选择类型" clearable>
+          <el-select v-model="filters.domain_type" placeholder="选择类型" clearable style="width: 60px">
             <el-option label="全部" value="" />
             <el-option label="CDN" value="cdn" />
             <el-option label="分析服务" value="analytics" />
@@ -114,7 +114,7 @@
         </el-form-item>
         
         <el-form-item label="风险等级">
-          <el-select v-model="filters.risk_level" placeholder="选择风险等级" clearable>
+          <el-select v-model="filters.risk_level" placeholder="选择风险等级" clearable style="width: 60px">
             <el-option label="全部" value="" />
             <el-option label="低风险" value="low" />
             <el-option label="中风险" value="medium" />
@@ -124,7 +124,7 @@
         </el-form-item>
         
         <el-form-item label="是否违规">
-          <el-select v-model="filters.has_violations" placeholder="选择违规状态" clearable>
+          <el-select v-model="filters.has_violations" placeholder="选择违规状态" clearable style="width: 60px">
             <el-option label="全部" value="" />
             <el-option label="有违规" value="true" />
             <el-option label="无违规" value="false" />

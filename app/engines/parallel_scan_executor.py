@@ -357,6 +357,19 @@ class ParallelScanExecutor:
                 {'stage': 'ai_analysis'}
             )
             
+            # 检查AI分析是否启用
+            ai_analysis_enabled = config.get('ai_analysis_enabled', True)
+            self.logger.info(f"AI分析配置: ai_analysis_enabled={ai_analysis_enabled}")
+            
+            if not ai_analysis_enabled:
+                self.logger.warning("⚠️ AI分析已被禁用，跳过分析阶段")
+                await self.event_store.emit(
+                    PipelineStage.ANALYSIS,
+                    'ai_analysis_disabled',
+                    {'reason': 'ai_analysis_disabled_in_config'}
+                )
+                return
+            
             analysis_count = 0
             ai_call_count = 0
             ai_skip_count = 0
@@ -372,28 +385,51 @@ class ParallelScanExecutor:
                     break
                 
                 try:
+                    self.logger.info(f"🔍 开始分析域名: {crawl_result.domain}")
+                    
                     # 第三方域名识别
                     third_party_domains = await self.identifier_engine.identify_third_party_domains(
                         crawl_result.domain, [crawl_result], config
                     )
                     self.results['third_party_domains'].extend(third_party_domains)
+                    self.logger.info(f"识别到 {len(third_party_domains)} 个第三方域名")
                     
                     # 内容抓取
                     content_results = await self.capture_engine.capture_domain_content(
                         crawl_result.domain, [crawl_result.url], config
                     )
                     self.results['content_results'].extend(content_results)
+                    self.logger.info(f"抓取到 {len(content_results)} 个内容结果")
                     
                     # 智能AI分析（预筛选）
-                    for content_result in content_results:
+                    for i, content_result in enumerate(content_results):
+                        self.logger.info(f"🤖 正在处理内容 ({i+1}/{len(content_results)}): {content_result.url}")
+                        
+                        # 详细检查内容结果
+                        self.logger.debug(f"内容结果详情: screenshot_path={getattr(content_result, 'screenshot_path', None)}, "
+                                         f"status_code={getattr(content_result, 'status_code', None)}")
+                        
                         should_analyze, reason = await self._should_analyze_with_ai(content_result)
+                        self.logger.info(f"预筛选结果: should_analyze={should_analyze}, reason={reason}")
                         
                         if should_analyze:
                             ai_call_count += 1
-                            violations = await self._perform_ai_analysis(content_result, config)
-                            self.results['violation_records'].extend(violations)
+                            self.logger.info(f"✅ 执行AI分析 (#{ai_call_count}): {content_result.url}")
+                            
+                            try:
+                                violations = await self._perform_ai_analysis(content_result, config)
+                                self.results['violation_records'].extend(violations)
+                                self.logger.info(f"🚨 AI分析完成，发现 {len(violations)} 个违规")
+                            except Exception as ai_error:
+                                self.logger.error(f"❌ AI分析失败: {ai_error}")
+                                await self.event_store.emit(
+                                    PipelineStage.ANALYSIS,
+                                    'ai_analysis_error',
+                                    {'url': content_result.url, 'error': str(ai_error)}
+                                )
                         else:
                             ai_skip_count += 1
+                            self.logger.info(f"⏭️ 跳过AI分析 (#{ai_skip_count}): {reason} - {content_result.url}")
                             await self.event_store.emit(
                                 PipelineStage.ANALYSIS,
                                 'ai_analysis_skipped',
@@ -419,6 +455,17 @@ class ParallelScanExecutor:
                 finally:
                     self.crawl_to_analysis.task_done()
             
+            # 计算AI效率统计
+            ai_efficiency = 0
+            if (ai_call_count + ai_skip_count) > 0:
+                ai_efficiency = (ai_skip_count / (ai_call_count + ai_skip_count) * 100)
+            
+            self.logger.info(f"🏁 分析阶段完成统计:")
+            self.logger.info(f"  - 总分析域名: {analysis_count}")
+            self.logger.info(f"  - AI调用次数: {ai_call_count}")
+            self.logger.info(f"  - AI跳过次数: {ai_skip_count}")
+            self.logger.info(f"  - AI效率: {ai_efficiency:.1f}%")
+            
             await self.event_store.emit(
                 PipelineStage.ANALYSIS,
                 'stage_completed',
@@ -426,7 +473,7 @@ class ParallelScanExecutor:
                     'total_analyzed': analysis_count,
                     'ai_calls': ai_call_count,
                     'ai_skips': ai_skip_count,
-                    'ai_efficiency': f"{(ai_skip_count / (ai_call_count + ai_skip_count) * 100):.1f}%" if (ai_call_count + ai_skip_count) > 0 else "0%"
+                    'ai_efficiency': f"{ai_efficiency:.1f}%"
                 }
             )
             
@@ -481,17 +528,30 @@ class ParallelScanExecutor:
     
     async def _should_analyze_with_ai(self, content_result: ContentResult) -> Tuple[bool, str]:
         """判断是否需要AI分析（预筛选）"""
-        # 快速预筛选规则
+        self.logger.debug(f"🔍 开始预筛选检查: {content_result.url}")
+        
+        # 检查截图文件
         if not content_result.screenshot_path:
+            self.logger.warning(f"⚠️ 没有截图路径: {content_result.url}")
             return False, "no_screenshot"
+        
+        self.logger.debug(f"🖼️ 截图路径: {content_result.screenshot_path}")
         
         # 检查文件大小
         try:
             import os
+            if not os.path.exists(content_result.screenshot_path):
+                self.logger.warning(f"⚠️ 截图文件不存在: {content_result.screenshot_path}")
+                return False, "screenshot_file_not_exists"
+                
             file_size = os.path.getsize(content_result.screenshot_path)
+            self.logger.debug(f"📄 截图文件大小: {file_size} bytes")
+            
             if file_size < 1024:  # 小于1KB，可能是空截图
+                self.logger.warning(f"⚠️ 截图文件太小: {file_size} bytes < 1KB")
                 return False, "screenshot_too_small"
-        except:
+        except Exception as e:
+            self.logger.error(f"❌ 检查截图文件失败: {e}")
             return False, "screenshot_file_error"
         
         # 检查URL模式
@@ -503,58 +563,110 @@ class ParallelScanExecutor:
         url_lower = content_result.url.lower()
         for pattern in suspicious_patterns:
             if pattern in url_lower:
+                self.logger.info(f"✅ 发现可疑模式 '{pattern}': {content_result.url}")
                 return True, f"suspicious_pattern_{pattern}"
         
         # 检查状态码
         if hasattr(content_result, 'status_code') and content_result.status_code is not None and content_result.status_code >= 400:
+            self.logger.info(f"⚠️ 错误状态码: {content_result.status_code}")
             return False, "error_status_code"
         
-        # 默认：随机采样策略（降低AI调用）
+        # 随机采样策略（为了调试，提高采样率）
         import random
-        sample_rate = 0.3  # 30%采样率
-        if random.random() < sample_rate:
+        sample_rate = 0.8  # 提高到80%采样率以便调试
+        random_value = random.random()
+        self.logger.debug(f"🎲 随机采样: {random_value:.3f} vs {sample_rate} (threshold)")
+        
+        if random_value < sample_rate:
+            self.logger.info(f"✅ 随机采样命中: {content_result.url}")
             return True, "random_sample"
         else:
+            self.logger.info(f"⏭️ 随机采样跳过: {content_result.url}")
             return False, "random_skip"
     
     async def _perform_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
         """执行AI分析"""
+        self.logger.info(f"🤖 开始执行AI分析: {content_result.url}")
+        
+        # 检查AI引擎是否已初始化
         if not self.ai_engine:
+            self.logger.info("🔧 正在初始化AI引擎...")
+            
             from app.models.user import UserAIConfig
             from app.core.database import AsyncSessionLocal
             
-            async with AsyncSessionLocal() as db:
-                ai_config = await db.get(UserAIConfig, self.user_id)
-                if ai_config:
+            try:
+                async with AsyncSessionLocal() as db:
+                    ai_config = await db.get(UserAIConfig, self.user_id)
+                    
+                    if not ai_config:
+                        self.logger.error(f"❌ 用户AI配置不存在: user_id={self.user_id}")
+                        return []
+                    
+                    self.logger.debug(f"🔑 获取到AI配置: model={ai_config.model_name}, "
+                                     f"has_api_key={bool(ai_config.openai_api_key)}, "
+                                     f"has_valid_config={ai_config.has_valid_config}")
+                    
+                    if not ai_config.has_valid_config:
+                        self.logger.error(f"❌ 用户AI配置无效: user_id={self.user_id}")
+                        return []
+                    
                     from app.engines.ai_analysis import AIAnalysisEngine
                     self.ai_engine = AIAnalysisEngine(self.task_id, ai_config)
+                    self.logger.info("✅ AI引擎初始化成功")
+                    
+            except Exception as e:
+                self.logger.error(f"❌ AI引擎初始化失败: {e}")
+                return []
         
         if self.ai_engine:
-            # 由于AIAnalysisEngine.analyze_domains需要ThirdPartyDomain对象列表
-            # 我们需要创建一个临时的域名对象来进行分析
-            from app.models.task import ThirdPartyDomain
-            from urllib.parse import urlparse
-            
-            # 从content_result.url解析域名
-            parsed_url = urlparse(content_result.url)
-            domain_name = parsed_url.netloc
-            
-            # 创建临时的ThirdPartyDomain对象
-            temp_domain = ThirdPartyDomain(
-                task_id=self.task_id,
-                domain=domain_name,
-                found_on_url=content_result.url,
-                screenshot_path=content_result.screenshot_path,
-                page_title=getattr(content_result, 'page_title', ''),
-                page_description=getattr(content_result, 'page_description', ''),
-                domain_type='unknown',
-                is_analyzed=False
-            )
-            
-            # 调用analyze_domains方法
-            violations = await self.ai_engine.analyze_domains([temp_domain])
-            return violations
+            try:
+                # 由于AIAnalysisEngine.analyze_domains需要ThirdPartyDomain对象列表
+                # 我们需要创建一个临时的域名对象来进行分析
+                from app.models.task import ThirdPartyDomain
+                from urllib.parse import urlparse
+                
+                # 从content_result.url解析域名
+                parsed_url = urlparse(content_result.url)
+                domain_name = parsed_url.netloc
+                
+                self.logger.debug(f"🌍 解析域名: {domain_name} from {content_result.url}")
+                
+                # 创建临时的ThirdPartyDomain对象
+                temp_domain = ThirdPartyDomain(
+                    task_id=self.task_id,
+                    domain=domain_name,
+                    found_on_url=content_result.url,
+                    screenshot_path=content_result.screenshot_path,
+                    page_title=getattr(content_result, 'page_title', ''),
+                    page_description=getattr(content_result, 'page_description', ''),
+                    domain_type='unknown',
+                    is_analyzed=False
+                )
+                
+                self.logger.info(f"📦 创建临时域名对象: {domain_name}")
+                
+                # 调用analyze_domains方法
+                self.logger.info(f"🚀 开始调用AI分析接口...")
+                violations = await self.ai_engine.analyze_domains([temp_domain])
+                
+                self.logger.info(f"✅ AI分析完成，返回 {len(violations)} 个违规记录")
+                
+                # 记录违规详情
+                for i, violation in enumerate(violations):
+                    self.logger.info(f"🚨 违规#{i+1}: {violation.violation_type} - "
+                                   f"置信度:{violation.confidence_score:.2f} - "
+                                   f"风险等级:{violation.risk_level}")
+                
+                return violations
+                
+            except Exception as e:
+                self.logger.error(f"❌ AI分析执行失败: {e}")
+                import traceback
+                self.logger.error(f"错误堆栈: {traceback.format_exc()}")
+                return []
         else:
+            self.logger.error("❌ AI引擎不可用")
             return []
     
     async def _calculate_final_statistics(self):

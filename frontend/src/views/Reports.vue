@@ -94,7 +94,7 @@
           />
         </el-form-item>
         <el-form-item label="报告状态">
-          <el-select v-model="filters.status" placeholder="选择状态" clearable>
+          <el-select v-model="filters.status" placeholder="选择状态" clearable style="width: 60px">
             <el-option label="生成中" value="generating" />
             <el-option label="已完成" value="completed" />
             <el-option label="生成失败" value="failed" />

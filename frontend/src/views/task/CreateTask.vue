@@ -22,7 +22,7 @@
             v-model="selectedPreset" 
             placeholder="选择预设配置" 
             @change="handlePresetChange"
-            style="width: 100%"
+            style="width: 60px"
           >
             <el-option
               v-for="preset in configPresets"
