@@ -19,8 +19,12 @@ class ConnectionInfo:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connected_at = datetime.utcnow()
-        self.last_ping = time.time()
+        self.last_ping = time.time()  # 最后一次接收到ping的时间
+        self.last_pong = time.time()  # 最后一次发送pong的时间
+        self.last_heartbeat_send = time.time()  # 最后一次发送心跳的时间
         self.subscriptions: Set[str] = set()  # 订阅的任务ID
+        self.ping_count = 0  # ping计数
+        self.is_alive = True  # 连接是否活跃
 
 
 class WebSocketManager:
@@ -36,6 +40,20 @@ class WebSocketManager:
         # 心跳检查任务
         self.heartbeat_task: Optional[asyncio.Task] = None
         self.is_running = False
+        
+        # 心跳配置
+        self.heartbeat_interval = 30  # 心跳间隔（30秒）
+        self.heartbeat_timeout = 90   # 心跳超时（90秒）
+        self.ping_interval = 25       # 主动ping间隔（25秒）
+        self.max_missed_pings = 3     # 最大未响应ping数
+        
+        # 统计信息
+        self.heartbeat_stats = {
+            'total_pings_sent': 0,
+            'total_pongs_received': 0,
+            'timeout_disconnections': 0,
+            'last_cleanup_time': time.time()
+        }
     
     async def start(self):
         """启动WebSocket管理器"""
@@ -239,10 +257,24 @@ class WebSocketManager:
             if message_type == "ping":
                 # 心跳包
                 connection_info.last_ping = time.time()
+                connection_info.ping_count += 1
+                self.heartbeat_stats['total_pongs_received'] += 1
+                
+                # 响应pong消息
                 await self._send_to_connection(connection_info, {
                     "type": "pong",
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "ping_count": connection_info.ping_count,
+                    "server_time": time.time()
                 })
+                
+                logger.debug(f"接收到心跳ping: {connection_id}, 计数: {connection_info.ping_count}")
+            
+            elif message_type == "pong":
+                # 客户端响应服务器的ping
+                connection_info.last_pong = time.time()
+                connection_info.ping_count += 1
+                logger.debug(f"接收到心跳pong: {connection_id}, 计数: {connection_info.ping_count}")
             
             elif message_type == "subscribe_task":
                 # 订阅任务
@@ -289,39 +321,134 @@ class WebSocketManager:
     
     async def _heartbeat_loop(self):
         """心跳检查循环"""
+        logger.info(f"心跳检查循环已启动，间隔: {self.heartbeat_interval}秒")
+        
         while self.is_running:
             try:
                 current_time = time.time()
+                connections_to_check = list(self.all_connections.values())
                 timeout_connections = []
+                ping_connections = []
                 
-                # 检查超时连接
-                for connection_info in self.all_connections.values():
-                    if current_time - connection_info.last_ping > 60:  # 60秒超时
+                # 检查所有连接
+                for connection_info in connections_to_check:
+                    if not connection_info.is_alive:
+                        continue
+                    
+                    # 检查是否需要发送ping
+                    time_since_last_heartbeat = current_time - connection_info.last_heartbeat_send
+                    if time_since_last_heartbeat >= self.ping_interval:
+                        ping_connections.append(connection_info)
+                    
+                    # 检查是否超时
+                    time_since_last_response = current_time - max(
+                        connection_info.last_ping, 
+                        connection_info.last_pong
+                    )
+                    
+                    if time_since_last_response > self.heartbeat_timeout:
                         timeout_connections.append(connection_info)
+                        logger.warning(
+                            f"连接超时: {connection_info.connection_id}, "
+                            f"最后响应: {time_since_last_response:.1f}秒前"
+                        )
+                
+                # 发送主动ping
+                for connection_info in ping_connections:
+                    await self._send_heartbeat_ping(connection_info)
                 
                 # 断开超时连接
                 for connection_info in timeout_connections:
+                    connection_info.is_alive = False
+                    self.heartbeat_stats['timeout_disconnections'] += 1
                     logger.info(f"WebSocket连接超时，断开连接: {connection_info.connection_id}")
                     await self._disconnect_internal(connection_info)
                 
-                await asyncio.sleep(30)  # 每30秒检查一次
+                # 更新统计信息
+                self.heartbeat_stats['last_cleanup_time'] = current_time
+                
+                # 记录详细的心跳统计
+                if len(connections_to_check) > 0:
+                    logger.debug(
+                        f"心跳检查完成: 连接数={len(connections_to_check)}, "
+                        f"ping数={len(ping_connections)}, 超时数={len(timeout_connections)}"
+                    )
+                
+                await asyncio.sleep(self.heartbeat_interval)
                 
             except asyncio.CancelledError:
+                logger.info("心跳循环被取消")
                 break
             except Exception as e:
                 logger.error(f"心跳检查异常: {e}")
-                await asyncio.sleep(30)
+                await asyncio.sleep(self.heartbeat_interval)
+    
+    async def _send_heartbeat_ping(self, connection_info: ConnectionInfo):
+        """发送主动心跳ping"""
+        try:
+            current_time = time.time()
+            connection_info.last_heartbeat_send = current_time
+            self.heartbeat_stats['total_pings_sent'] += 1
+            
+            ping_message = {
+                "type": "ping",
+                "timestamp": datetime.utcnow().isoformat(),
+                "server_time": current_time,
+                "sequence": self.heartbeat_stats['total_pings_sent']
+            }
+            
+            success = await self._send_to_connection(connection_info, ping_message)
+            
+            if success:
+                logger.debug(f"发送心跳ping: {connection_info.connection_id}")
+            else:
+                logger.warning(f"发送心跳ping失败: {connection_info.connection_id}")
+                connection_info.is_alive = False
+                
+        except Exception as e:
+            logger.error(f"发送心跳ping异常: {e}")
+            connection_info.is_alive = False
     
     def get_stats(self) -> Dict[str, Any]:
         """获取连接统计信息"""
+        current_time = time.time()
+        
+        # 计算活跃连接
+        active_connections = sum(
+            1 for conn in self.all_connections.values() 
+            if conn.is_alive and (current_time - conn.last_ping) < self.heartbeat_timeout
+        )
+        
         return {
             "total_connections": len(self.all_connections),
+            "active_connections": active_connections,
             "active_users": len(self.user_connections),
             "task_subscriptions": len(self.task_subscribers),
             "connections_by_user": {
                 user_id: len(connections) 
                 for user_id, connections in self.user_connections.items()
-            }
+            },
+            "heartbeat_stats": {
+                **self.heartbeat_stats,
+                "heartbeat_interval": self.heartbeat_interval,
+                "heartbeat_timeout": self.heartbeat_timeout,
+                "ping_interval": self.ping_interval,
+                "max_missed_pings": self.max_missed_pings,
+                "uptime_seconds": current_time - self.heartbeat_stats['last_cleanup_time'] if self.is_running else 0
+            },
+            "connection_details": [
+                {
+                    "connection_id": conn.connection_id,
+                    "user_id": conn.user_id,
+                    "connected_at": conn.connected_at.isoformat(),
+                    "last_ping": conn.last_ping,
+                    "last_pong": conn.last_pong,
+                    "ping_count": conn.ping_count,
+                    "is_alive": conn.is_alive,
+                    "subscriptions_count": len(conn.subscriptions)
+                }
+                for conn in self.all_connections.values()
+            ]
         }
 
 

@@ -91,20 +91,11 @@
         
         <div class="header-right">
           <!-- WebSocket连接状态 -->
-          <div class="connection-status">
-            <el-tooltip 
-              :content="connectionStatusText" 
-              placement="bottom"
-            >
-              <el-badge 
-                :type="connectionStatusType"
-                is-dot
-                class="status-badge"
-              >
-                <el-icon><Connection /></el-icon>
-              </el-badge>
-            </el-tooltip>
-          </div>
+          <WebSocketStatus 
+            :show-details="true" 
+            :show-reconnect="true" 
+            class="websocket-status-widget"
+          />
           
           <!-- 通知 -->
           <el-badge :value="unreadNotifications" class="notification-badge">
@@ -117,7 +108,7 @@
           <el-dropdown @command="handleUserCommand">
             <div class="user-info">
               <el-avatar 
-                :src="userStore.user?.avatar" 
+                :src="userStore.user?.avatar_url" 
                 :size="32"
               >
                 {{ userStore.user?.username?.charAt(0).toUpperCase() }}
@@ -166,17 +157,18 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useWebSocketStore } from '@/stores/websocket'
+import WebSocketStatus from '@/components/WebSocketStatus.vue'
 import type { MenuItem, BreadcrumbItem } from '@/types'
 import {
   Menu,
-  Dashboard,
   List,
   User,
   Setting,
   Bell,
   Connection,
   ArrowDown,
-  SwitchButton
+  SwitchButton,
+  Odometer
 } from '@element-plus/icons-vue'
 
 // Stores
@@ -197,7 +189,7 @@ const menuItems = computed<MenuItem[]>(() => {
     {
       id: 'dashboard',
       title: '仪表板',
-      icon: 'Dashboard',
+      icon: 'Odometer',
       path: '/dashboard'
     },
     {
@@ -261,25 +253,6 @@ const breadcrumbItems = computed<BreadcrumbItem[]>(() => {
   })
   
   return items
-})
-
-// WebSocket连接状态
-const connectionStatusType = computed(() => {
-  switch (wsStore.status) {
-    case 'connected': return 'success'
-    case 'connecting': return 'warning'
-    case 'error': return 'danger'
-    default: return 'info'
-  }
-})
-
-const connectionStatusText = computed(() => {
-  switch (wsStore.status) {
-    case 'connected': return '实时连接正常'
-    case 'connecting': return '正在连接...'
-    case 'error': return '连接异常'
-    default: return '未连接'
-  }
 })
 
 // 切换侧边栏
@@ -417,7 +390,7 @@ wsStore.enableAutoReconnect()
   gap: 16px;
 }
 
-.connection-status {
+.websocket-status-widget {
   display: flex;
   align-items: center;
 }

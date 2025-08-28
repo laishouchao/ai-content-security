@@ -57,6 +57,23 @@ export const useWebSocketStore = defineStore('websocket', () => {
   const lastError = ref<string>('')
   const connectedAt = ref<string>('')
   
+  // 心跳相关状态
+  const heartbeatInterval = ref<number | null>(null)
+  const pingInterval = ref(30000) // 30秒发送一次ping
+  const pongTimeout = ref(10000)  // 10秒等待pong响应
+  const lastPingTime = ref<number>(0)
+  const lastPongTime = ref<number>(0)
+  const pingCount = ref(0)
+  const missedPongs = ref(0)
+  const maxMissedPongs = ref(3)
+  
+  // 重连相关状态
+  const isReconnecting = ref(false)
+  const reconnectTimer = ref<number | null>(null)
+  const autoReconnectEnabled = ref(true)
+  const backoffMultiplier = ref(1.5)
+  const maxReconnectInterval = ref(30000)
+  
   // 计算属性
   const isConnected = computed(() => status.value === WebSocketStatus.CONNECTED)
   const isConnecting = computed(() => status.value === WebSocketStatus.CONNECTING)
@@ -193,11 +210,41 @@ export const useWebSocketStore = defineStore('websocket', () => {
       console.log('✅ WebSocket连接成功')
       status.value = WebSocketStatus.CONNECTED
       reconnectAttempts.value = 0
+      isReconnecting.value = false
+      lastError.value = ''
+      
+      // 重置心跳相关状态
+      pingCount.value = 0
+      missedPongs.value = 0
+      lastPingTime.value = 0
+      lastPongTime.value = Date.now()
+      
+      // 启动心跳
+      startHeartbeat()
     }
 
     ws.value.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data)
+        
+        // 处理心跳消息
+        if (message.type === 'ping') {
+          // 收到服务器ping，自动响应pong
+          const pongMessage = {
+            type: 'pong',
+            timestamp: new Date().toISOString(),
+            client_time: Date.now(),
+            sequence: message.sequence || 0
+          }
+          ws.value?.send(JSON.stringify(pongMessage))
+          console.log('🏓 收到服务器ping，已响应pong')
+          return
+        } else if (message.type === 'pong') {
+          // 收到服务器pong响应
+          handlePong(message)
+          return
+        }
+        
         console.log('📨 收到后端WebSocket消息:', message)
         handleMessage(message)
       } catch (error) {
@@ -211,15 +258,32 @@ export const useWebSocketStore = defineStore('websocket', () => {
         reason: event.reason,
         wasClean: event.wasClean
       })
+      
       status.value = WebSocketStatus.DISCONNECTED
       
+      // 停止心跳
+      stopHeartbeat()
+      
       // 根据关闭代码判断是否需要重连
-      if (event.code !== 1000 && event.code !== 1001 && reconnectAttempts.value < maxReconnectAttempts.value) {
+      const shouldReconnect = autoReconnectEnabled.value && 
+                             event.code !== 1000 && // 正常关闭
+                             event.code !== 1001 && // 用户离开
+                             event.code !== 1005 && // 无状态码
+                             reconnectAttempts.value < maxReconnectAttempts.value
+      
+      if (shouldReconnect) {
         console.log('🔄 准备自动重连...')
         scheduleReconnect()
       } else if (event.code === 1008) {
         console.error('❌ WebSocket认证失败，请重新登录')
-        // 可以触发重新登录逻辑
+        lastError.value = '认证失败，请重新登录'
+        status.value = WebSocketStatus.ERROR
+      } else if (!autoReconnectEnabled.value) {
+        console.log('🔄 自动重连已禁用')
+      } else {
+        console.log('🔄 已达最大重连次数，停止重连')
+        lastError.value = '连接失败，已达最大重连次数'
+        status.value = WebSocketStatus.ERROR
       }
     }
 
@@ -229,7 +293,11 @@ export const useWebSocketStore = defineStore('websocket', () => {
         readyState: ws.value?.readyState,
         url: ws.value?.url
       })
-      status.value = WebSocketStatus.ERROR
+      
+      if (status.value === WebSocketStatus.CONNECTING) {
+        status.value = WebSocketStatus.ERROR
+        lastError.value = 'WebSocket连接错误'
+      }
     }
   }
 
@@ -328,23 +396,193 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   // 安排重连
   const scheduleReconnect = () => {
+    // 检查是否启用自动重连
+    if (!autoReconnectEnabled.value) {
+      console.log('🔄 自动重连已禁用，不进行重连')
+      return
+    }
+    
+    // 检查重连次数是否超过限制
+    if (reconnectAttempts.value >= maxReconnectAttempts.value) {
+      console.error(`❌ 重连次数已达上限 (${maxReconnectAttempts.value})，停止重连`)
+      status.value = WebSocketStatus.ERROR
+      lastError.value = `重连失败，已尝试 ${maxReconnectAttempts.value} 次`
+      isReconnecting.value = false
+      return
+    }
+    
+    // 防止重复调度
+    if (isReconnecting.value) {
+      console.log('🔄 已有重连在进行中，跳过')
+      return
+    }
+    
     reconnectAttempts.value++
+    isReconnecting.value = true
     
-    console.log(`🔄 准备重连 (${reconnectAttempts.value}/${maxReconnectAttempts.value})`)
+    const interval = getNextReconnectInterval()
     
-    setTimeout(() => {
-      connect()
-    }, reconnectInterval.value)
+    console.log(
+      `🔄 安排第 ${reconnectAttempts.value} 次重连，` +
+      `${interval / 1000}秒后尝试 (${reconnectAttempts.value}/${maxReconnectAttempts.value})`
+    )
+    
+    reconnectTimer.value = window.setTimeout(async () => {
+      try {
+        isReconnecting.value = true
+        console.log(`🔄 开始第 ${reconnectAttempts.value} 次重连尝试...`)
+        
+        await connect()
+        
+        // 如果连接成功，重置状态
+        if (status.value === WebSocketStatus.CONNECTED) {
+          console.log('✅ 重连成功')
+          resetReconnectState()
+        }
+        
+      } catch (error) {
+        console.error(`❌ 第 ${reconnectAttempts.value} 次重连失败:`, error)
+        lastError.value = `重连失败: ${error}`
+        
+        // 继续尝试下一次重连
+        isReconnecting.value = false
+        scheduleReconnect()
+        
+      } finally {
+        reconnectTimer.value = null
+      }
+    }, interval)
   }
 
   // 断开连接
   const disconnect = () => {
+    console.log('🔌 手动断开WebSocket连接')
+    
+    // 停止心跳
+    stopHeartbeat()
+    
+    // 取消重连
+    cancelReconnect()
+    
     if (ws.value) {
-      ws.value.close()
+      ws.value.close(1000, '用户主动断开') // 正常关闭
       ws.value = null
     }
     status.value = WebSocketStatus.DISCONNECTED
     reconnectAttempts.value = 0
+    isReconnecting.value = false
+  }
+  
+  // 启动心跳
+  const startHeartbeat = () => {
+    console.log('💖 启动WebSocket心跳机制')
+    
+    stopHeartbeat() // 先停止已有的心跳
+    
+    heartbeatInterval.value = window.setInterval(() => {
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        const now = Date.now()
+        
+        // 检查是否有未响应的ping
+        if (lastPingTime.value > 0 && lastPongTime.value < lastPingTime.value) {
+          const timeSinceLastPing = now - lastPingTime.value
+          if (timeSinceLastPing > pongTimeout.value) {
+            missedPongs.value++
+            console.warn(`⚠️ 未收到pong响应，未响应次数: ${missedPongs.value}/${maxMissedPongs.value}`)
+            
+            if (missedPongs.value >= maxMissedPongs.value) {
+              console.error('❌ 连续多次未收到pong响应，视为连接已断开')
+              lastError.value = '心跳超时'
+              ws.value.close(1002, '心跳超时')
+              return
+            }
+          }
+        }
+        
+        // 发送ping
+        sendPing()
+      }
+    }, pingInterval.value)
+  }
+  
+  // 停止心跳
+  const stopHeartbeat = () => {
+    if (heartbeatInterval.value) {
+      clearInterval(heartbeatInterval.value)
+      heartbeatInterval.value = null
+      console.log('💖 心跳机制已停止')
+    }
+  }
+  
+  // 发送ping
+  const sendPing = () => {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      const now = Date.now()
+      pingCount.value++
+      lastPingTime.value = now
+      
+      const pingMessage = {
+        type: 'ping',
+        timestamp: new Date().toISOString(),
+        client_time: now,
+        sequence: pingCount.value
+      }
+      
+      ws.value.send(JSON.stringify(pingMessage))
+      console.log(`🏓 发送ping (${pingCount.value})`)
+    }
+  }
+  
+  // 处理pong响应
+  const handlePong = (message: any) => {
+    const now = Date.now()
+    lastPongTime.value = now
+    missedPongs.value = 0 // 重置未响应计数
+    
+    const latency = now - (message.client_time || lastPingTime.value)
+    console.log(`🏓 收到pong响应，延迟: ${latency}ms`)
+  }
+
+  // 取消重连
+  const cancelReconnect = () => {
+    if (reconnectTimer.value) {
+      clearTimeout(reconnectTimer.value)
+      reconnectTimer.value = null
+      isReconnecting.value = false
+      console.log('🔄 已取消重连')
+    }
+  }
+  
+  // 启用自动重连
+  const enableAutoReconnect = () => {
+    autoReconnectEnabled.value = true
+    console.log('🔄 已启用自动重连')
+  }
+  
+  // 禁用自动重连
+  const disableAutoReconnect = () => {
+    autoReconnectEnabled.value = false
+    cancelReconnect()
+    console.log('🔄 已禁用自动重连')
+  }
+  
+  // 重置重连状态
+  const resetReconnectState = () => {
+    reconnectAttempts.value = 0
+    isReconnecting.value = false
+    cancelReconnect()
+    // 重置重连间隔为初始值
+    reconnectInterval.value = 5000
+  }
+  
+  // 计算下次重连间隔（指数退避）
+  const getNextReconnectInterval = () => {
+    const baseInterval = 5000
+    const currentInterval = Math.min(
+      baseInterval * Math.pow(backoffMultiplier.value, reconnectAttempts.value),
+      maxReconnectInterval.value
+    )
+    return currentInterval
   }
 
   // 发送消息
@@ -438,19 +676,47 @@ export const useWebSocketStore = defineStore('websocket', () => {
     lastError: computed(() => lastError.value),
     connectedAt: computed(() => connectedAt.value),
     
+    // 心跳状态
+    pingCount: computed(() => pingCount.value),
+    missedPongs: computed(() => missedPongs.value),
+    lastPingTime: computed(() => lastPingTime.value),
+    lastPongTime: computed(() => lastPongTime.value),
+    
+    // 重连状态
+    isReconnecting: computed(() => isReconnecting.value),
+    autoReconnectEnabled: computed(() => autoReconnectEnabled.value),
+    maxReconnectAttempts: computed(() => maxReconnectAttempts.value),
+    
     // 计算属性
     isConnected,
     isConnecting,
     connectionStatusText,
     connectionStatusType,
     
-    // 方法
+    // 连接管理方法
     connect,
     disconnect,
+    
+    // 心跳方法
+    startHeartbeat,
+    stopHeartbeat,
+    sendPing,
+    
+    // 重连方法
+    enableAutoReconnect,
+    disableAutoReconnect,
+    resetReconnectState,
+    scheduleReconnect,
+    
+    // 消息方法
     send,
     clearMessages,
+    
+    // 任务订阅方法
     subscribeToTask,
     unsubscribeFromTask,
+    
+    // 事件方法
     on,
     off,
     emit
