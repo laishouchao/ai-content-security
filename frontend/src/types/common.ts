@@ -245,3 +245,19 @@ export interface ResponsiveBreakpoints {
   xl: number
   xxl: number
 }
+
+// 扫描配置
+export interface ScanConfig {
+  max_depth: number
+  max_pages_per_domain: number
+  request_delay: number
+  timeout: number
+  user_agent: string
+  headers: Record<string, string>
+  allowed_domains: string[]
+  blocked_domains: string[]
+  file_extensions: string[]
+  enable_screenshots: boolean
+  screenshot_width: number
+  screenshot_height: number
+}

@@ -19,42 +19,38 @@
       </el-form-item>
 
       <el-form-item label="SMTP服务器" v-if="config.email_enabled">
-        <el-input v-model="config.smtp_host" placeholder="smtp.example.com" />
+        <el-input v-model="config.email_smtp_host" placeholder="smtp.example.com" />
       </el-form-item>
 
       <el-form-item label="SMTP端口" v-if="config.email_enabled">
-        <el-input-number v-model="config.smtp_port" :min="1" :max="65535" />
+        <el-input-number v-model="config.email_smtp_port" :min="1" :max="65535" />
       </el-form-item>
 
       <el-form-item label="发件人邮箱" v-if="config.email_enabled">
-        <el-input v-model="config.sender_email" placeholder="admin@example.com" />
+        <el-input v-model="config.email_smtp_username" placeholder="admin@example.com" />
       </el-form-item>
 
       <el-form-item label="邮箱密码" v-if="config.email_enabled">
-        <el-input v-model="config.sender_password" type="password" show-password />
+        <el-input v-model="config.email_smtp_password" type="password" show-password />
       </el-form-item>
 
       <!-- 通知触发条件 -->
       <el-divider content-position="left">通知触发条件</el-divider>
 
       <el-form-item label="任务完成通知">
-        <el-switch v-model="config.notify_task_completed" />
+        <el-switch v-model="config.task_completion_notification" />
       </el-form-item>
 
       <el-form-item label="发现违规通知">
-        <el-switch v-model="config.notify_violations" />
+        <el-switch v-model="config.violation_detection_notification" />
       </el-form-item>
 
       <el-form-item label="系统错误通知">
-        <el-switch v-model="config.notify_errors" />
+        <el-switch v-model="config.system_error_notification" />
       </el-form-item>
 
-      <el-form-item label="高风险违规阈值">
-        <el-select v-model="config.high_risk_threshold" style="width: 60px">
-          <el-option label="立即通知" value="immediate" />
-          <el-option label="1小时内累计5个" value="5_per_hour" />
-          <el-option label="1天内累计10个" value="10_per_day" />
-        </el-select>
+      <el-form-item label="通知阈值">
+        <el-input-number v-model="config.notification_threshold" :min="1" :max="100" />
       </el-form-item>
 
       <!-- 通知接收人 -->
@@ -62,7 +58,7 @@
 
       <el-form-item label="接收人邮箱">
         <el-tag
-          v-for="email in config.recipient_emails"
+          v-for="email in config.email_recipients"
           :key="email"
           closable
           @close="removeRecipient(email)"

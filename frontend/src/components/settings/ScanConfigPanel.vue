@@ -237,7 +237,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import type { ScanConfig } from '@/types'
 
 // Props和Emits
@@ -260,15 +260,21 @@ const formRef = ref<FormInstance>()
 const saving = ref(false)
 const localConfig = reactive<ScanConfig>({ ...props.config })
 
+// 请求头项类型
+interface HeaderItem {
+  key: string
+  value: string
+}
+
 // 请求头列表
-const headersList = computed({
+const headersList = computed<HeaderItem[]>({
   get: () => {
     return Object.entries(localConfig.headers || {}).map(([key, value]) => ({
       key,
       value
     }))
   },
-  set: (newHeaders) => {
+  set: (newHeaders: HeaderItem[]) => {
     const headers: Record<string, string> = {}
     newHeaders.forEach(header => {
       if (header.key && header.value) {
@@ -281,22 +287,22 @@ const headersList = computed({
 })
 
 // 表单验证规则
-const rules = {
+const rules: FormRules = {
   max_depth: [
     { required: true, message: '请设置扫描深度', trigger: 'blur' },
-    { type: 'number', min: 1, max: 10, message: '扫描深度应在1-10之间', trigger: 'blur' }
+    { type: 'number' as const, min: 1, max: 10, message: '扫描深度应在1-10之间', trigger: 'blur' }
   ],
   max_pages_per_domain: [
     { required: true, message: '请设置每域名最大页面数', trigger: 'blur' },
-    { type: 'number', min: 1, max: 1000, message: '页面数应在1-1000之间', trigger: 'blur' }
+    { type: 'number' as const, min: 1, max: 1000, message: '页面数应在1-1000之间', trigger: 'blur' }
   ],
   request_delay: [
     { required: true, message: '请设置请求延迟', trigger: 'blur' },
-    { type: 'number', min: 0.1, max: 10, message: '延迟时间应在0.1-10秒之间', trigger: 'blur' }
+    { type: 'number' as const, min: 0.1, max: 10, message: '延迟时间应在0.1-10秒之间', trigger: 'blur' }
   ],
   timeout: [
     { required: true, message: '请设置超时时间', trigger: 'blur' },
-    { type: 'number', min: 5, max: 120, message: '超时时间应在5-120秒之间', trigger: 'blur' }
+    { type: 'number' as const, min: 5, max: 120, message: '超时时间应在5-120秒之间', trigger: 'blur' }
   ],
   user_agent: [
     { required: true, message: '请输入User Agent', trigger: 'blur' },
@@ -311,7 +317,7 @@ const handleConfigChange = () => {
 
 // 添加请求头
 const addHeader = () => {
-  const newHeaders = [...headersList.value, { key: '', value: '' }]
+  const newHeaders: HeaderItem[] = [...headersList.value, { key: '', value: '' }]
   headersList.value = newHeaders
 }
 
