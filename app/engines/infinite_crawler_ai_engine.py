@@ -26,6 +26,12 @@ import ssl
 import re
 
 from app.core.logging import TaskLogger
+from app.engines.advanced_prompt_system import (
+    EnhancedPromptManager,
+    AnalysisType,
+    PromptContext,
+    create_prompt_context
+)
 
 
 @dataclass
@@ -191,6 +197,7 @@ class InfiniteCrawlerAIEngine:
         
         # 初始化组件
         self.prompt_builder = DomainAIPromptBuilder()
+        self.enhanced_prompt_manager = EnhancedPromptManager(task_id, user_id)
         self.session: Optional[aiohttp.ClientSession] = None
         
         # 缓存管理
@@ -318,12 +325,30 @@ class InfiniteCrawlerAIEngine:
             )
             
             try:
-                # 构建分析提示词
-                analysis_prompt = self.prompt_builder.build_domain_analysis_prompt(request)
-                result.analysis_prompt_used = analysis_prompt
+                # 使用增强的提示词系统构建分析提示词
+                prompt_context = create_prompt_context(
+                    domain=request.domain,
+                    page_title=request.page_title,
+                    page_content=request.page_content,
+                    screenshot_path=request.screenshot_path,
+                    source_urls=request.source_urls,
+                    discovery_method=request.discovery_method
+                )
+                
+                # 生成优化的提示词
+                prompt_result = await self.enhanced_prompt_manager.generate_analysis_prompt(
+                    prompt_context,
+                    AnalysisType.COMPREHENSIVE
+                )
+                
+                result.analysis_prompt_used = prompt_result.user_prompt
                 
                 # 准备API请求
-                api_response = await self._call_openai_api(analysis_prompt, request.screenshot_path)
+                api_response = await self._call_openai_api_enhanced(
+                    prompt_result.system_prompt,
+                    prompt_result.user_prompt,
+                    request.screenshot_path
+                )
                 
                 if api_response:
                     # 解析AI响应
@@ -374,6 +399,97 @@ class InfiniteCrawlerAIEngine:
         messages[1]["content"].append({
             "type": "text",
             "text": prompt
+        })
+        
+        # 添加截图（如果有）
+        if screenshot_path and Path(screenshot_path).exists():
+            try:
+                with open(screenshot_path, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                
+                messages[1]["content"].append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{image_data}",
+                        "detail": "low"  # 使用低细节以节省token
+                    }
+                })
+            except Exception as e:
+                self.logger.warning(f"读取截图失败: {e}")
+        
+        # 构建请求数据
+        request_data = {
+            "model": self.config.model,
+            "messages": messages,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature
+        }
+        
+        # 重试机制
+        last_error = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                async with self.rate_limiter:
+                    async with self.session.post(
+                        f"{self.config.base_url}/chat/completions",
+                        json=request_data
+                    ) as response:
+                        
+                        if response.status == 200:
+                            api_response = await response.json()
+                            self.stats['api_calls_made'] += 1
+                            
+                            # 记录token使用量
+                            if 'usage' in api_response:
+                                self.stats['tokens_used'] += api_response['usage'].get('total_tokens', 0)
+                            
+                            return api_response
+                        else:
+                            error_text = await response.text()
+                            raise aiohttp.ClientResponseError(
+                                request_info=response.request_info,
+                                history=response.history,
+                                status=response.status,
+                                message=f"API错误: {error_text}"
+                            )
+            
+            except Exception as e:
+                last_error = e
+                if attempt < self.config.max_retries:
+                    wait_time = (2 ** attempt) + 1  # 指数退避
+                    self.logger.warning(f"API调用失败 (尝试 {attempt + 1}/{self.config.max_retries + 1}): {e}, {wait_time}秒后重试")
+                    await asyncio.sleep(wait_time)
+                else:
+                    self.logger.error(f"API调用最终失败: {e}")
+        
+        return None
+    
+    async def _call_openai_api_enhanced(
+        self, 
+        system_prompt: str,
+        user_prompt: str,
+        screenshot_path: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """增强的OpenAI API调用，支持系统提示词和用户提示词分离"""
+        if not self.session:
+            raise RuntimeError("会话未初始化")
+        
+        # 构建消息
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": []
+            }
+        ]
+        
+        # 添加文本内容
+        messages[1]["content"].append({
+            "type": "text",
+            "text": user_prompt
         })
         
         # 添加截图（如果有）
@@ -534,13 +650,78 @@ class InfiniteCrawlerAIEngine:
             await self.session.close()
             self.session = None
         
+        # 清理提示词管理器缓存
+        if hasattr(self, 'enhanced_prompt_manager'):
+            self.enhanced_prompt_manager.clear_cache()
+        
         self._session_initialized = False
         self.logger.info("AI分析引擎资源清理完成")
 
 
 # 便捷函数
+async def create_ai_analysis_config_from_database(user_id: str) -> Optional[AIAnalysisConfig]:
+    """从数据库中创建AI配置"""
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.models.user import UserAIConfig
+        from sqlalchemy import select
+        
+        async with AsyncSessionLocal() as db:
+            # 查询用户AI配置
+            stmt = select(UserAIConfig).where(UserAIConfig.user_id == user_id)
+            result = await db.execute(stmt)
+            user_ai_config = result.scalar_one_or_none()
+            
+            if not user_ai_config or not user_ai_config.has_valid_config:
+                # 如果没有配置或配置无效，尝试使用系统默认配置
+                from app.models.setting import Setting
+                
+                # 查询系统默认AI配置
+                ai_settings = {}
+                default_settings = [
+                    'openai_api_key', 'openai_base_url', 'ai_model_name',
+                    'openai_max_tokens', 'openai_temperature', 'openai_timeout'
+                ]
+                
+                for setting_key in default_settings:
+                    setting_stmt = select(Setting).where(Setting.key == setting_key)
+                    setting_result = await db.execute(setting_stmt)
+                    setting = setting_result.scalar_one_or_none()
+                    if setting and setting.value:
+                        ai_settings[setting_key] = setting.value
+                
+                # 检查必要的配置项
+                if not ai_settings.get('openai_api_key') or not ai_settings.get('openai_base_url'):
+                    return None
+                
+                config = AIAnalysisConfig(
+                    api_key=ai_settings['openai_api_key'],
+                    base_url=ai_settings.get('openai_base_url', 'https://api.openai.com/v1'),
+                    model=ai_settings.get('ai_model_name', 'gpt-4-vision-preview'),
+                    max_tokens=int(ai_settings.get('openai_max_tokens', '1500')),
+                    temperature=float(ai_settings.get('openai_temperature', '0.3')),
+                    timeout=int(ai_settings.get('openai_timeout', '60'))
+                )
+            else:
+                # 使用用户自定义配置
+                config = AIAnalysisConfig(
+                    api_key=str(user_ai_config.openai_api_key),
+                    base_url=str(user_ai_config.openai_base_url or 'https://api.openai.com/v1'),
+                    model=str(user_ai_config.ai_model_name or 'gpt-4-vision-preview'),
+                    max_tokens=int(user_ai_config.openai_max_tokens or 1500),
+                    temperature=float(user_ai_config.openai_temperature or 0.3),
+                    timeout=60
+                )
+            
+            return config
+            
+    except Exception as e:
+        print(f"从数据库加载AI配置失败: {e}")
+        return None
+
+
 async def create_ai_analysis_config_from_env() -> Optional[AIAnalysisConfig]:
-    """从环境变量创建AI配置"""
+    """从环境变量创建AI配置（保留作为备用）"""
     import os
     
     api_key = os.getenv('OPENAI_API_KEY')
