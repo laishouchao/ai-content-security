@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from datetime import datetime
 import uuid
+from pydantic import BaseModel, Field, validator
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -12,10 +13,49 @@ from app.core.logging import logger
 from app.core.config import settings
 from app.models.user import User
 from app.models.task import ScanTask, TaskStatus, TaskLog
+from app.schemas.task import (
+    CreateTaskSchema, TaskResponseSchema, TaskListResponseSchema,
+    TaskConfigPresetSchema, PerformanceMetricsSchema
+)
 from app.tasks.scan_tasks import scan_domain_task
 from app.websocket.handlers import task_monitor
 
 router = APIRouter()
+
+
+def safe_get_value(obj, attr, default=None):
+    """安全获取SQLAlchemy对象属性值"""
+    try:
+        value = getattr(obj, attr, default)
+        # 对于Column对象，直接返回其实际值
+        return value
+    except Exception:
+        return default
+
+
+def convert_task_to_response(task) -> Dict[str, Any]:
+    """将ScanTask对象转换为响应格式"""
+    return {
+        "id": str(safe_get_value(task, 'id')),
+        "target_domain": str(safe_get_value(task, 'target_domain')),
+        "task_name": safe_get_value(task, 'task_name'),
+        "description": safe_get_value(task, 'description'),
+        "status": safe_get_value(task, 'status'),
+        "progress": int(safe_get_value(task, 'progress', 0)),
+        "config": safe_get_value(task, 'config') or {},
+        "total_subdomains": int(safe_get_value(task, 'total_subdomains', 0)),
+        "total_pages_crawled": int(safe_get_value(task, 'total_pages_crawled', 0)),
+        "total_third_party_domains": int(safe_get_value(task, 'total_third_party_domains', 0)),
+        "total_violations": int(safe_get_value(task, 'total_violations', 0)),
+        "critical_violations": int(safe_get_value(task, 'critical_violations', 0)),
+        "high_violations": int(safe_get_value(task, 'high_violations', 0)),
+        "medium_violations": int(safe_get_value(task, 'medium_violations', 0)),
+        "low_violations": int(safe_get_value(task, 'low_violations', 0)),
+        "created_at": task.created_at.isoformat() if safe_get_value(task, 'created_at') else None,
+        "started_at": task.started_at.isoformat() if safe_get_value(task, 'started_at') else None,
+        "completed_at": task.completed_at.isoformat() if safe_get_value(task, 'completed_at') else None,
+        "error_message": safe_get_value(task, 'error_message')
+    }
 
 
 @router.get("/stats")
@@ -46,19 +86,30 @@ async def get_task_stats(
         )
 
 
-@router.post("")
+@router.post("", response_model=TaskResponseSchema)
 async def create_scan_task(
-    task_data: dict,
+    task_data: CreateTaskSchema,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> Any:
     """创建扫描任务"""
     try:
-        target_domain = task_data.get("target_domain")
-        if not target_domain:
-            raise ValidationError("缺少目标域名")
+        target_domain = task_data.target_domain
+        config = task_data.config.dict()
         
-        config = task_data.get("config", {})
+        # 确保性能优化配置默认值
+        performance_defaults = {
+            'use_parallel_executor': True,
+            'smart_prefilter_enabled': True,
+            'dns_concurrency': 100,
+            'ai_skip_threshold': 0.3,
+            'multi_viewport_capture': False
+        }
+        
+        # 合并配置，优先使用用户提供的配置
+        for key, default_value in performance_defaults.items():
+            if key not in config:
+                config[key] = default_value
         
         # 创建任务记录
         task_id = str(uuid.uuid4())
@@ -66,6 +117,8 @@ async def create_scan_task(
             id=task_id,
             user_id=current_user.id,
             target_domain=target_domain,
+            task_name=task_data.task_name,
+            description=task_data.description,
             status=TaskStatus.PENDING,
             config=config,
             created_at=datetime.utcnow()
@@ -110,11 +163,17 @@ async def create_scan_task(
             
             logger.info(f"扫描任务已创建: {task_id} - {target_domain}")
             
+            # 构建响应
+            task_response_data: Dict[str, Any] = convert_task_to_response(task)
+            # 重写config字段为传入的config
+            task_response_data["config"] = config
+            task_response_data["progress"] = 0  # 初始状态进度为0
+            
+            response_data = TaskResponseSchema(**task_response_data)
+            
             return {
                 "success": True,
-                "task_id": task_id,
-                "target_domain": target_domain,
-                "status": task.status,
+                "data": response_data,
                 "message": "扫描任务已创建并开始执行"
             }
             
@@ -142,7 +201,7 @@ async def create_scan_task(
         )
 
 
-@router.get("")
+@router.get("", response_model=TaskListResponseSchema)
 async def get_scan_tasks(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
@@ -173,37 +232,18 @@ async def get_scan_tasks(
         # 转换为响应格式
         task_list = []
         for task in tasks:
-            task_data = {
-                "id": task.id,
-                "target_domain": task.target_domain,
-                "task_name": task.task_name,
-                "status": task.status,
-                "progress": task.progress,
-                "created_at": task.created_at.isoformat() if task.created_at is not None else None,
-                "started_at": task.started_at.isoformat() if task.started_at is not None else None,
-                "completed_at": task.completed_at.isoformat() if task.completed_at is not None else None,
-                "statistics": {
-                    "total_subdomains": task.total_subdomains,
-                    "total_pages_crawled": task.total_pages_crawled,
-                    "total_third_party_domains": task.total_third_party_domains,
-                    "total_violations": task.total_violations,
-                    "critical_violations": task.critical_violations,
-                    "high_violations": task.high_violations,
-                    "medium_violations": task.medium_violations,
-                    "low_violations": task.low_violations
-                },
-                "error_message": task.error_message
-            }
-            task_list.append(task_data)
+            task_response_data: Dict[str, Any] = convert_task_to_response(task)
+            task_response = TaskResponseSchema(**task_response_data)
+            task_list.append(task_response)
         
         return {
             "success": True,
-            "data": {
-                "items": task_list,
-                "total": total,
-                "skip": skip,
-                "limit": limit
-            }
+            "data": TaskListResponseSchema(
+                total=total,
+                items=task_list,
+                skip=skip,
+                limit=limit
+            )
         }
         
     except Exception as e:
@@ -415,6 +455,216 @@ async def delete_scan_task(
         raise HTTPException(
             status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
             detail="删除扫描任务失败"
+        )
+
+
+@router.get("/config/presets")
+async def get_config_presets(
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """获取任务配置预设"""
+    try:
+        from app.schemas.task import TaskConfigSchema
+        
+        # 定义预设配置
+        presets = [
+            TaskConfigPresetSchema(
+                name="快速扫描",
+                description="适合日常安全检查的快速扫描配置，执行时间约5分钟",
+                config=TaskConfigSchema(
+                    subdomain_discovery_enabled=True,
+                    link_crawling_enabled=True,
+                    third_party_identification_enabled=True,
+                    content_capture_enabled=True,
+                    ai_analysis_enabled=True,
+                    max_subdomains=200,
+                    max_crawl_depth=2,
+                    max_pages_per_domain=500,
+                    request_delay=1000,
+                    timeout=30,
+                    use_parallel_executor=True,
+                    smart_prefilter_enabled=True,
+                    dns_concurrency=100,
+                    ai_skip_threshold=0.2,
+                    max_crawl_iterations=3,
+                    multi_viewport_capture=False,
+                    enable_aggressive_caching=False,
+                    certificate_discovery_enabled=True,
+                    passive_dns_enabled=False,
+                    max_concurrent_ai_calls=3,
+                    batch_size=10,
+                    screenshot_optimization=True
+                )
+            ),
+            TaskConfigPresetSchema(
+                name="标准扫描",
+                description="平衡性能和准确性的标准扫描配置，执行时间约15分钟",
+                config=TaskConfigSchema(
+                    subdomain_discovery_enabled=True,
+                    link_crawling_enabled=True,
+                    third_party_identification_enabled=True,
+                    content_capture_enabled=True,
+                    ai_analysis_enabled=True,
+                    max_subdomains=500,
+                    max_crawl_depth=3,
+                    max_pages_per_domain=1000,
+                    request_delay=1000,
+                    timeout=30,
+                    use_parallel_executor=True,
+                    smart_prefilter_enabled=True,
+                    dns_concurrency=100,
+                    ai_skip_threshold=0.3,
+                    max_crawl_iterations=5,
+                    multi_viewport_capture=True,
+                    enable_aggressive_caching=False,
+                    certificate_discovery_enabled=True,
+                    passive_dns_enabled=False,
+                    max_concurrent_ai_calls=3,
+                    batch_size=10,
+                    screenshot_optimization=True
+                )
+            ),
+            TaskConfigPresetSchema(
+                name="深度扫描",
+                description="全面扫描所有功能，适合安全审计，执行时间约30分钟",
+                config=TaskConfigSchema(
+                    subdomain_discovery_enabled=True,
+                    link_crawling_enabled=True,
+                    third_party_identification_enabled=True,
+                    content_capture_enabled=True,
+                    ai_analysis_enabled=True,
+                    max_subdomains=1000,
+                    max_crawl_depth=5,
+                    max_pages_per_domain=5000,
+                    request_delay=1000,
+                    timeout=30,
+                    use_parallel_executor=True,
+                    smart_prefilter_enabled=True,
+                    dns_concurrency=150,
+                    ai_skip_threshold=0.4,
+                    max_crawl_iterations=8,
+                    multi_viewport_capture=True,
+                    enable_aggressive_caching=False,
+                    certificate_discovery_enabled=True,
+                    passive_dns_enabled=True,
+                    max_concurrent_ai_calls=5,
+                    batch_size=15,
+                    screenshot_optimization=True
+                )
+            ),
+            TaskConfigPresetSchema(
+                name="成本优化",
+                description="最大化节省AI调用成本的配置，适合大批量扫描",
+                config=TaskConfigSchema(
+                    subdomain_discovery_enabled=True,
+                    link_crawling_enabled=True,
+                    third_party_identification_enabled=True,
+                    content_capture_enabled=True,
+                    ai_analysis_enabled=True,
+                    max_subdomains=300,
+                    max_crawl_depth=2,
+                    max_pages_per_domain=1000,
+                    request_delay=1000,
+                    timeout=30,
+                    use_parallel_executor=True,
+                    smart_prefilter_enabled=True,
+                    dns_concurrency=100,
+                    ai_skip_threshold=0.1,
+                    max_crawl_iterations=4,
+                    multi_viewport_capture=False,
+                    enable_aggressive_caching=True,
+                    certificate_discovery_enabled=False,
+                    passive_dns_enabled=False,
+                    max_concurrent_ai_calls=2,
+                    batch_size=20,
+                    screenshot_optimization=False
+                )
+            )
+        ]
+        
+        return {
+            "success": True,
+            "data": [preset.dict() for preset in presets]
+        }
+        
+    except Exception as e:
+        logger.error(f"获取配置预设失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取配置预设失败"
+        )
+
+
+@router.post("/{task_id}/performance-metrics")
+async def get_task_performance_metrics(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """获取任务性能指标"""
+    try:
+        # 验证任务存在且属于当前用户
+        query = select(ScanTask).where(
+            and_(
+                ScanTask.id == task_id,
+                ScanTask.user_id == current_user.id
+            )
+        )
+        result = await db.execute(query)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在或无权访问"
+            )
+        
+        # 计算性能指标
+        execution_time = 0
+        started_at = safe_get_value(task, 'started_at')
+        completed_at = safe_get_value(task, 'completed_at')
+        if started_at and completed_at:
+            execution_time = (completed_at - started_at).total_seconds()
+        
+        # 从任务配置和结果中提取性能数据
+        config = safe_get_value(task, 'config') or {}
+        results_summary = safe_get_value(task, 'results_summary') or {}
+        ai_calls_made = results_summary.get('ai_calls_made', 0)
+        ai_calls_skipped = results_summary.get('ai_calls_skipped', 0)
+        
+        # 估算成本节省（假设每次AI调用成本0.01美元）
+        cost_saved = ai_calls_skipped * 0.01
+        
+        metrics = PerformanceMetricsSchema(
+            execution_time=execution_time,
+            subdomains_discovered=int(safe_get_value(task, 'total_subdomains', 0)),
+            pages_crawled=int(safe_get_value(task, 'total_pages_crawled', 0)),
+            ai_calls_made=ai_calls_made,
+            ai_calls_skipped=ai_calls_skipped,
+            cost_saved=cost_saved
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "metrics": metrics.dict(),
+                "ai_skip_rate": f"{metrics.ai_skip_rate:.1f}%",
+                "efficiency_score": f"{metrics.efficiency_score:.1f}",
+                "performance_optimizations": {
+                    "parallel_executor_enabled": config.get('use_parallel_executor', False),
+                    "smart_prefilter_enabled": config.get('smart_prefilter_enabled', False),
+                    "dns_concurrency": config.get('dns_concurrency', 50)
+                }
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取任务性能指标失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取任务性能指标失败"
         )
 
 

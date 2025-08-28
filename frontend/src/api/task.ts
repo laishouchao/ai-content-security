@@ -50,6 +50,39 @@ export interface TaskConfig {
   max_pages_per_domain: number
   request_delay: number
   timeout: number
+  
+  // 性能优化配置
+  use_parallel_executor?: boolean
+  smart_prefilter_enabled?: boolean
+  dns_concurrency?: number
+  ai_skip_threshold?: number
+  multi_viewport_capture?: boolean
+  enable_aggressive_caching?: boolean
+  
+  // 高级配置
+  certificate_discovery_enabled?: boolean
+  passive_dns_enabled?: boolean
+  max_concurrent_ai_calls?: number
+  batch_size?: number
+  screenshot_optimization?: boolean
+  max_crawl_iterations?: number
+}
+
+export interface TaskConfigPreset {
+  name: string
+  description: string
+  config: TaskConfig
+}
+
+export interface PerformanceMetrics {
+  execution_time: number
+  subdomains_discovered: number
+  pages_crawled: number
+  ai_calls_made: number
+  ai_calls_skipped: number
+  cost_saved: number
+  ai_skip_rate: number
+  efficiency_score: number
 }
 
 export interface CreateTaskRequest {
@@ -197,6 +230,25 @@ class TaskAPI {
     system_status: Record<string, any>
   }>>> {
     return http.get('/tasks/stats')
+  }
+  
+  // 获取配置预设
+  async getConfigPresets(): Promise<AxiosResponse<ApiResponse<TaskConfigPreset[]>>> {
+    return http.get('/tasks/config/presets')
+  }
+  
+  // 获取任务性能指标
+  async getTaskPerformanceMetrics(taskId: string): Promise<AxiosResponse<ApiResponse<{
+    metrics: PerformanceMetrics
+    ai_skip_rate: string
+    efficiency_score: string
+    performance_optimizations: {
+      parallel_executor_enabled: boolean
+      smart_prefilter_enabled: boolean
+      dns_concurrency: number
+    }
+  }>>> {
+    return http.post(`/tasks/${taskId}/performance-metrics`)
   }
 }
 

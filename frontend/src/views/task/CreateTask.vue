@@ -16,6 +16,31 @@
         <!-- 基本配置 -->
         <el-divider content-position="left">基本配置</el-divider>
         
+        <!-- 配置预设 -->
+        <el-form-item label="配置预设">
+          <el-select 
+            v-model="selectedPreset" 
+            placeholder="选择预设配置" 
+            @change="handlePresetChange"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="preset in configPresets"
+              :key="preset.name"
+              :label="preset.name"
+              :value="preset.name"
+            >
+              <div style="display: flex; flex-direction: column">
+                <span style="font-weight: 500">{{ preset.name }}</span>
+                <span style="font-size: 12px; color: #999">{{ preset.description }}</span>
+              </div>
+            </el-option>
+          </el-select>
+          <div class="form-tip">
+            🎯 选择预设配置快速设置参数，或手动调整配置
+          </div>
+        </el-form-item>
+        
         <el-form-item label="目标域名" prop="domain">
           <el-input
             v-model="taskForm.domain"
@@ -134,6 +159,79 @@
           <span class="form-unit">秒</span>
         </el-form-item>
 
+        <!-- 性能优化配置 -->
+        <el-divider content-position="left">
+          <el-icon><Lightning /></el-icon>
+          性能优化配置
+        </el-divider>
+        
+        <el-form-item label="并行执行器">
+          <el-switch v-model="taskForm.useParallelExecutor" />
+          <span class="form-label">启用三轨并行流水线架构</span>
+          <div class="form-tip">
+            🚀 启用后可提升3-5倍执行速度，适合大规模扫描任务
+          </div>
+        </el-form-item>
+        
+        <el-form-item label="智能AI预筛选">
+          <el-switch v-model="taskForm.smartPrefilterEnabled" />
+          <span class="form-label">启用AI调用优化</span>
+          <div class="form-tip">
+            💰 可减少70-90%的AI调用，大幅降低成本同时提升速度
+          </div>
+        </el-form-item>
+        
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="DNS并发数">
+              <el-input-number
+                v-model="taskForm.dnsConcurrency"
+                :min="10"
+                :max="200"
+                :step="10"
+                style="width: 100%"
+              />
+              <div class="form-tip">
+                子域名发现的DNS查询并发数，建议100-150
+              </div>
+            </el-form-item>
+          </el-col>
+          
+          <el-col :span="12">
+            <el-form-item label="AI预筛选阈值">
+              <el-slider
+                v-model="taskForm.aiSkipThreshold"
+                :min="0.1"
+                :max="0.8"
+                :step="0.1"
+                show-input
+                input-size="small"
+                :format-tooltip="(val) => `${(val * 100).toFixed(0)}%`"
+                style="width: 100%"
+              />
+              <div class="form-tip">
+                阈值越低，AI跳过率越高，成本越低
+              </div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        
+        <el-form-item label="多视角截图">
+          <el-switch v-model="taskForm.multiViewportCapture" />
+          <span class="form-label">启用桌面/移动/平板多视角截图</span>
+          <div class="form-tip">
+            📱 同时抓取多种设备视角的页面截图，提供更全面的分析
+          </div>
+        </el-form-item>
+        
+        <el-form-item label="激进缓存">
+          <el-switch v-model="taskForm.enableAggressiveCaching" />
+          <span class="form-label">启用激进缓存策略</span>
+          <div class="form-tip">
+            ⚡ 大幅减少重复计算，适合批量扫描相似域名
+          </div>
+        </el-form-item>
+
         <!-- 提交按钮 -->
         <el-form-item>
           <el-button type="primary" @click="handleSubmit" :loading="submitting">
@@ -148,17 +246,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { Lightning } from '@element-plus/icons-vue'
 import { taskAPI } from '@/api/task'
-import type { CreateTaskRequest } from '@/api/task'
+import type { CreateTaskRequest, TaskConfigPreset } from '@/api/task'
 
 const router = useRouter()
 
 // 响应式状态
 const submitting = ref(false)
 const taskFormRef = ref<FormInstance>()
+const selectedPreset = ref('')
+const configPresets = ref<TaskConfigPreset[]>([])
 
 const taskForm = reactive({
   domain: '',
@@ -173,7 +274,14 @@ const taskForm = reactive({
   crawlDepth: 3,
   maxPages: 1000,
   requestDelay: 1000,
-  timeout: 30
+  timeout: 30,
+  // 性能优化配置
+  useParallelExecutor: true,      // 默认启用并行执行器
+  smartPrefilterEnabled: true,    // 默认启用智能预筛选
+  dnsConcurrency: 100,            // DNS并发数
+  aiSkipThreshold: 0.3,           // AI跳过阈值
+  multiViewportCapture: false,    // 多视角截图
+  enableAggressiveCaching: false  // 激进缓存
 })
 
 // 表单验证规则
@@ -191,6 +299,51 @@ const taskRules: FormRules = {
   ]
 }
 
+// 加载配置预设
+const loadConfigPresets = async () => {
+  try {
+    const response = await taskAPI.getConfigPresets()
+    if (response.data.success && response.data.data) {
+      configPresets.value = response.data.data
+    }
+  } catch (error) {
+    console.error('加载配置预设失败:', error)
+  }
+}
+
+// 处理预设配置变化
+const handlePresetChange = (presetName: string) => {
+  const preset = configPresets.value.find(p => p.name === presetName)
+  if (preset) {
+    // 应用预设配置到表单
+    const config = preset.config
+    taskForm.enableSubdomain = config.subdomain_discovery_enabled
+    taskForm.enableCrawling = config.link_crawling_enabled
+    taskForm.enableCapture = config.content_capture_enabled
+    taskForm.enableAI = config.ai_analysis_enabled
+    taskForm.maxSubdomains = config.max_subdomains
+    taskForm.crawlDepth = config.max_crawl_depth
+    taskForm.maxPages = config.max_pages_per_domain
+    taskForm.requestDelay = config.request_delay
+    taskForm.timeout = config.timeout
+    
+    // 性能优化配置
+    taskForm.useParallelExecutor = config.use_parallel_executor ?? true
+    taskForm.smartPrefilterEnabled = config.smart_prefilter_enabled ?? true
+    taskForm.dnsConcurrency = config.dns_concurrency ?? 100
+    taskForm.aiSkipThreshold = config.ai_skip_threshold ?? 0.3
+    taskForm.multiViewportCapture = config.multi_viewport_capture ?? false
+    taskForm.enableAggressiveCaching = config.enable_aggressive_caching ?? false
+    
+    ElMessage.success(`已应用预设配置: ${presetName}`)
+  }
+}
+
+// 组件挂载时加载预设
+onMounted(() => {
+  loadConfigPresets()
+})
+
 // 监听扫描模式变化
 watch(() => taskForm.scanMode, (newMode) => {
   switch (newMode) {
@@ -202,6 +355,10 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 1
       taskForm.crawlDepth = 1
       taskForm.maxPages = 50
+      // 快速模式优化配置
+      taskForm.dnsConcurrency = 50
+      taskForm.aiSkipThreshold = 0.2
+      taskForm.multiViewportCapture = false
       break
     case 'standard':
       taskForm.enableSubdomain = true
@@ -211,6 +368,10 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 100
       taskForm.crawlDepth = 3
       taskForm.maxPages = 1000
+      // 标准模式优化配置
+      taskForm.dnsConcurrency = 100
+      taskForm.aiSkipThreshold = 0.3
+      taskForm.multiViewportCapture = false
       break
     case 'deep':
       taskForm.enableSubdomain = true
@@ -220,6 +381,10 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 500
       taskForm.crawlDepth = 5
       taskForm.maxPages = 5000
+      // 深度模式优化配置
+      taskForm.dnsConcurrency = 150
+      taskForm.aiSkipThreshold = 0.4
+      taskForm.multiViewportCapture = true
       break
   }
 })
@@ -249,7 +414,22 @@ const handleSubmit = async () => {
         max_crawl_depth: taskForm.crawlDepth,
         max_pages_per_domain: taskForm.maxPages,
         request_delay: taskForm.requestDelay,
-        timeout: taskForm.timeout
+        timeout: taskForm.timeout,
+        // 性能优化配置
+        use_parallel_executor: taskForm.useParallelExecutor,
+        smart_prefilter_enabled: taskForm.smartPrefilterEnabled,
+        dns_concurrency: taskForm.dnsConcurrency,
+        ai_skip_threshold: taskForm.aiSkipThreshold,
+        multi_viewport_capture: taskForm.multiViewportCapture,
+        enable_aggressive_caching: taskForm.enableAggressiveCaching,
+        
+        // 高级配置
+        certificate_discovery_enabled: true,
+        passive_dns_enabled: false,
+        max_concurrent_ai_calls: 3,
+        batch_size: 10,
+        screenshot_optimization: true,
+        max_crawl_iterations: 5
       }
     }
     

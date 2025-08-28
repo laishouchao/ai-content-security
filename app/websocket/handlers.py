@@ -164,6 +164,57 @@ class TaskMonitorHandler:
             # 即使获取用户失败，也尝试发送给任务订阅者
             await websocket_manager.broadcast_to_task_subscribers(task_id, message)
     
+    async def notify_task_event(self, task_id: str, user_id: str, event_data: Dict[str, Any]):
+        """通知任务事件（用于并行执行器）"""
+        # 验证事件数据
+        if not event_data:
+            logger.warning(f"任务事件数据为空，跳过发送: {task_id}")
+            return
+        
+        # 构建通知消息
+        message = {
+            "type": "task_event",
+            "task_id": task_id,
+            "event": event_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # 根据事件类型添加描述性消息
+        event_type = event_data.get('event_type', '')
+        stage = event_data.get('stage', '')
+        data = event_data.get('data', {})
+        
+        if event_type == 'scan_started':
+            message["message"] = f"开始扫描: {data.get('target_domain', '未知域名')}"
+        elif event_type == 'stage_started':
+            stage_name = data.get('stage', stage)
+            message["message"] = f"开始{stage_name}阶段"
+        elif event_type == 'subdomains_discovered':
+            count = data.get('count', 0)
+            message["message"] = f"发现 {count} 个子域名"
+        elif event_type == 'subdomain_crawled':
+            subdomain = data.get('subdomain', '')
+            pages = data.get('pages', 0)
+            message["message"] = f"已爬取 {subdomain}，获得 {pages} 个页面"
+        elif event_type == 'domain_analyzed':
+            domain = data.get('domain', '')
+            violations = data.get('violations_found', 0)
+            message["message"] = f"已分析 {domain}，发现 {violations} 个潜在违规"
+        elif event_type == 'scan_completed':
+            duration = data.get('duration', 0)
+            message["message"] = f"扫描完成，耗时 {duration:.1f} 秒"
+        elif event_type == 'scan_failed':
+            error = data.get('error', '未知错误')
+            message["message"] = f"扫描失败: {error}"
+        else:
+            message["message"] = f"{stage}阶段事件: {event_type}"
+        
+        # 发送给用户和任务订阅者
+        await websocket_manager.broadcast_to_user(user_id, message)
+        await websocket_manager.broadcast_to_task_subscribers(task_id, message)
+        
+        logger.debug(f"任务事件通知已发送: {task_id} - {event_type}")
+    
     async def send_task_logs(self, task_id: str, logs: List[Dict[str, Any]]):
         """发送任务日志"""
         message = {

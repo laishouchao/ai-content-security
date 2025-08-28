@@ -8,7 +8,8 @@ from app.core.logging import TaskLogger
 from app.core.database import AsyncSessionLocal
 from app.models.task import ScanTask, TaskStatus, TaskLog, SubdomainRecord, ThirdPartyDomain, ViolationRecord
 from app.engines.scan_executor import ScanTaskExecutor, ScanExecutionResult
-from app.websocket.handlers import task_monitor
+from app.engines.parallel_scan_executor import ParallelScanExecutor
+from app.websocket.handlers import task_monitor, TaskMonitorHandler
 from celery_app import celery_app
 
 
@@ -138,18 +139,43 @@ async def _execute_scan_task(
             await task_monitor.notify_task_started(task_id, user_id)
             
             # 创建扫描执行器
-            executor = ScanTaskExecutor(task_id, user_id)
+            use_parallel_executor = config.get('use_parallel_executor', True)  # 默认使用并行执行器
             
-            # 设置进度回调
-            async def progress_callback(task_id: str, progress: int, message: str):
-                await _update_task_status(db, task_id, TaskStatus.RUNNING, progress, message)
-                await _log_task_event(db, task_id, "INFO", "progress", message)
-                # 实时通知已在scan_executor中处理
+            if use_parallel_executor:
+                executor = ParallelScanExecutor(task_id, user_id)
+                logger.info("使用并行扫描执行器")
+            else:
+                executor = ScanTaskExecutor(task_id, user_id)
+                logger.info("使用传统扫描执行器")
             
-            executor.set_progress_callback(progress_callback)
+            # 设置进度回调（仅对传统执行器）
+            if isinstance(executor, ScanTaskExecutor):
+                async def progress_callback(task_id: str, progress: int, message: str):
+                    await _update_task_status(db, task_id, TaskStatus.RUNNING, progress, message)
+                    await _log_task_event(db, task_id, "INFO", "progress", message)
+                    # 实时通知已在scan_executor中处理
+                
+                executor.set_progress_callback(progress_callback)
+            
+            # 设置事件订阅（仅对并行执行器）
+            if isinstance(executor, ParallelScanExecutor):
+                # 确保 task_monitor 是 TaskMonitorHandler 实例
+                monitor: TaskMonitorHandler = task_monitor  # type: ignore
+                
+                async def event_handler(event):
+                    # 将事件转发到WebSocket
+                    await monitor.notify_task_event(task_id, user_id, event.to_dict())
+                
+                executor.event_store.subscribe(event_handler)
             
             # 执行扫描
-            scan_result = await executor.execute_scan(target_domain, config)
+            if isinstance(executor, ParallelScanExecutor):
+                # 并行执行器返回完整结果
+                scan_result_dict = await executor.execute_scan(target_domain, config)
+                scan_result = _convert_parallel_result_to_scan_result(scan_result_dict)
+            else:
+                # 传统执行器
+                scan_result = await executor.execute_scan(target_domain, config)
             
             # 保存扫描结果到数据库
             await _save_scan_results(db, scan_result)
@@ -179,7 +205,8 @@ async def _execute_scan_task(
                 'status': scan_result.status,
                 'statistics': scan_result.statistics,
                 'errors': scan_result.errors,
-                'warnings': scan_result.warnings
+                'warnings': scan_result.warnings,
+                'executor_type': 'parallel' if use_parallel_executor else 'traditional'
             }
             
         except Exception as e:
@@ -466,3 +493,54 @@ celery_app.conf.beat_schedule = {
         'schedule': crontab(hour=2, minute=0),  # 每天凌晨2点执行   # type: ignore
     },
 }
+
+
+def _convert_parallel_result_to_scan_result(parallel_result: Dict[str, Any]) -> ScanExecutionResult:
+    """
+    将并行执行器的结果转换为传统ScanExecutionResult格式
+    确保与现有的数据库保存逻辑兼容
+    """
+    scan_result = ScanExecutionResult()
+    
+    # 基本信息
+    scan_result.task_id = parallel_result.get('task_id', '')
+    scan_result.status = parallel_result.get('status', 'completed')
+    scan_result.start_time = datetime.fromtimestamp(parallel_result.get('start_time', 0)) if parallel_result.get('start_time') else None
+    scan_result.end_time = datetime.fromtimestamp(parallel_result.get('end_time', 0)) if parallel_result.get('end_time') else None
+    
+    # 提取结果数据
+    results = parallel_result.get('results', {})
+    
+    # 子域名结果
+    scan_result.subdomains = results.get('subdomains', [])
+    
+    # 爬取结果
+    scan_result.crawl_results = results.get('crawl_results', [])
+    
+    # 第三方域名
+    scan_result.third_party_domains = results.get('third_party_domains', [])
+    
+    # 内容结果
+    scan_result.content_results = results.get('content_results', [])
+    
+    # 违规记录
+    scan_result.violation_records = results.get('violation_records', [])
+    
+    # 统计信息
+    scan_result.statistics = results.get('statistics', {})
+    
+    # 错误和警告（如果存在）
+    scan_result.errors = results.get('errors', [])
+    scan_result.warnings = results.get('warnings', [])
+    
+    # 事件信息（并行执行器特有）
+    events = parallel_result.get('events', [])
+    if events:
+        # 可以将事件信息保存到统计中
+        scan_result.statistics['total_events'] = len(events)
+        scan_result.statistics['event_timeline'] = [
+            {'timestamp': event.get('timestamp'), 'type': event.get('event_type')} 
+            for event in events[-10:]  # 保留最后10个事件
+        ]
+    
+    return scan_result

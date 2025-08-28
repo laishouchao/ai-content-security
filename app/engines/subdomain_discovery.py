@@ -10,6 +10,7 @@ from typing import List, Dict, Set, Optional, Any
 from urllib.parse import urlparse
 from datetime import datetime
 import time
+import random
 
 from app.core.logging import TaskLogger
 from app.core.config import settings
@@ -95,43 +96,56 @@ class DNSQueryMethod:
         return None
 
 
-class CertificateTransparencyMethod:
-    """证书透明日志查询方法"""
+class MultiSourceCertificateMethod:
+    """多源证书透明日志查询方法"""
     
     def __init__(self):
-        self.ct_logs = [
-            "https://crt.sh/?q=%25.{domain}&output=json",
-            "https://api.certspotter.com/v1/issuances?domain={domain}&include_subdomains=true&expand=dns_names"
-        ]
+        self.sources = {
+            'crt_sh': "https://crt.sh/?q=%25.{domain}&output=json",
+            'censys': "https://search.censys.io/api/v2/certificates/search",
+            'facebook_ct': "https://graph.facebook.com/certificates?query={domain}"
+        }
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
     
-    async def discover(self, domain: str, logger: TaskLogger) -> List[SubdomainResult]:
-        """通过证书透明日志发现子域名"""
+    async def discover_multi_source(self, domain: str, logger: TaskLogger, sources: List[str] = None) -> List[SubdomainResult]:
+        """多源并发证书透明日志查询"""
+        if sources is None:
+            sources = ['crt_sh', 'censys', 'facebook_ct']
+        
         results = set()
         
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            connector=aiohttp.TCPConnector(ssl=False)
+            connector=aiohttp.TCPConnector(ssl=False),
+            headers=self.headers
         ) as session:
             
-            # 查询crt.sh
-            try:
-                crt_results = await self._query_crt_sh(session, domain, logger)
-                results.update(crt_results)
-            except Exception as e:
-                logger.warning(f"crt.sh查询失败: {e}")
+            # 并发查询所有源
+            tasks = []
+            for source in sources:
+                if source == 'crt_sh':
+                    tasks.append(self._query_crt_sh_enhanced(session, domain, logger))
+                elif source == 'censys':
+                    tasks.append(self._query_censys(session, domain, logger))
+                elif source == 'facebook_ct':
+                    tasks.append(self._query_facebook_ct(session, domain, logger))
             
-            # 查询certspotter（如果有API密钥）
-            try:
-                certspotter_results = await self._query_certspotter(session, domain, logger)
-                results.update(certspotter_results)
-            except Exception as e:
-                logger.debug(f"certspotter查询失败: {e}")
+            source_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for i, result in enumerate(source_results):
+                if isinstance(result, set):
+                    results.update(result)
+                    logger.info(f"{sources[i]} 发现 {len(result)} 个子域名")
+                elif isinstance(result, Exception):
+                    logger.warning(f"{sources[i]} 查询失败: {result}")
         
-        logger.info(f"证书透明日志发现 {len(results)} 个子域名")
+        logger.info(f"多源证书透明日志发现 {len(results)} 个子域名")
         return list(results)
     
-    async def _query_crt_sh(self, session: aiohttp.ClientSession, domain: str, logger: TaskLogger) -> Set[SubdomainResult]:
-        """查询crt.sh证书透明日志"""
+    async def _query_crt_sh_enhanced(self, session: aiohttp.ClientSession, domain: str, logger: TaskLogger) -> Set[SubdomainResult]:
+        """增强的crt.sh查询"""
         results = set()
         url = f"https://crt.sh/?q=%25.{domain}&output=json"
         
@@ -140,23 +154,83 @@ class CertificateTransparencyMethod:
                 if response.status == 200:
                     data = await response.json()
                     
+                    # 使用BloomFilter概念进行去重（简化版）
+                    seen_domains = set()
+                    
                     for cert in data:
                         if 'name_value' in cert:
                             names = cert['name_value'].split('\n')
                             for name in names:
                                 name = name.strip().lower()
-                                if name and self._is_valid_subdomain(name, domain):
-                                    results.add(SubdomainResult(name, "certificate_transparency"))
+                                if name and name not in seen_domains and self._is_valid_subdomain(name, domain):
+                                    seen_domains.add(name)
+                                    results.add(SubdomainResult(name, "crt_sh_enhanced"))
                                     
         except Exception as e:
-            logger.warning(f"crt.sh查询异常: {e}")
+            logger.warning(f"crt.sh增强查询异常: {e}")
         
         return results
     
-    async def _query_certspotter(self, session: aiohttp.ClientSession, domain: str, logger: TaskLogger) -> Set[SubdomainResult]:
-        """查询certspotter API"""
+    async def _query_censys(self, session: aiohttp.ClientSession, domain: str, logger: TaskLogger) -> Set[SubdomainResult]:
+        """Censys API查询"""
         results = set()
-        # 这里需要API密钥，暂时跳过
+        
+        # 需要API密钥，这里提供框架
+        censys_api_key = getattr(settings, 'CENSYS_API_KEY', None)
+        if not censys_api_key:
+            logger.debug("Censys API密钥未配置，跳过查询")
+            return results
+        
+        try:
+            headers = {
+                'Authorization': f'Bearer {censys_api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            query_data = {
+                'query': f'names: *.{domain}',
+                'per_page': 100,
+                'cursor': ''
+            }
+            
+            async with session.post(
+                'https://search.censys.io/api/v2/certificates/search',
+                headers=headers,
+                json=query_data
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    for cert in data.get('result', {}).get('hits', []):
+                        for name in cert.get('names', []):
+                            if self._is_valid_subdomain(name, domain):
+                                results.add(SubdomainResult(name, "censys"))
+                                
+        except Exception as e:
+            logger.debug(f"Censys查询失败: {e}")
+        
+        return results
+    
+    async def _query_facebook_ct(self, session: aiohttp.ClientSession, domain: str, logger: TaskLogger) -> Set[SubdomainResult]:
+        """Facebook CT API查询"""
+        results = set()
+        
+        try:
+            # Facebook CT API通常需要认证，这里提供基础框架
+            url = f"https://graph.facebook.com/certificates?query={domain}"
+            
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    for cert in data.get('data', []):
+                        for name in cert.get('domains', []):
+                            if self._is_valid_subdomain(name, domain):
+                                results.add(SubdomainResult(name, "facebook_ct"))
+                                
+        except Exception as e:
+            logger.debug(f"Facebook CT查询失败: {e}")
+        
         return results
     
     def _is_valid_subdomain(self, name: str, domain: str) -> bool:
@@ -415,3 +489,50 @@ class SubdomainDiscoveryEngine:
         # 如果都无法访问，记录为不可访问
         result.is_accessible = False
         result.response_time = time.time() - start_time
+    
+    # 新增高性能方法
+    async def discover_dns_with_concurrency(self, domain: str, concurrency: int = 100, timeout: int = 3) -> List[SubdomainResult]:
+        """高并发DNS发现"""
+        try:
+            self.logger.info(f"开始高并发DNS发现: {domain}, 并发数: {concurrency}")
+            
+            # 使用增强的DNS查询方法
+            enhanced_dns = EnhancedDNSQueryMethod(concurrency)
+            results = await enhanced_dns.discover_with_concurrency(domain, self.logger, concurrency)
+            
+            self.logger.info(f"高并发DNS发现完成: {len(results)} 个子域名")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"高并发DNS发现失败: {e}")
+            return []
+    
+    async def discover_certificate_multi_source(self, domain: str, sources: List[str] = None) -> List[SubdomainResult]:
+        """多源证书透明日志发现"""
+        try:
+            self.logger.info(f"开始多源证书透明日志发现: {domain}")
+            
+            multi_cert_method = MultiSourceCertificateMethod()
+            results = await multi_cert_method.discover_multi_source(domain, self.logger, sources)
+            
+            self.logger.info(f"多源证书发现完成: {len(results)} 个子域名")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"多源证书发现失败: {e}")
+            return []
+    
+    async def discover_passive_dns(self, domain: str) -> List[SubdomainResult]:
+        """被动DNS发现"""
+        try:
+            self.logger.info(f"开始被动DNS发现: {domain}")
+            
+            passive_dns_method = PassiveDNSMethod()
+            results = await passive_dns_method.discover_passive_dns(domain, self.logger)
+            
+            self.logger.info(f"被动DNS发现完成: {len(results)} 个子域名")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"被动DNS发现失败: {e}")
+            return []
