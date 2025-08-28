@@ -581,14 +581,14 @@ class ScanTaskExecutor:
                 # 为子域名创建类似第三方域名的结构，以便AI分析
                 for subdomain_record in subdomain_records:
                     # 只分析可访问的子域名
-                    if subdomain_record.is_accessible:
+                    if subdomain_record.is_accessible is True:
                         # 查找对应的截图文件
                         screenshot_path = None
                         self.logger.debug(f"查找子域名 {subdomain_record.subdomain} 的截图文件...")
                         
                         for content_result in result.content_results:
                             self.logger.debug(f"检查内容结果: URL={content_result.url}, 截图路径={content_result.screenshot_path}")
-                            if subdomain_record.subdomain in content_result.url:
+                            if str(subdomain_record.subdomain) in content_result.url:
                                 screenshot_path = content_result.screenshot_path
                                 self.logger.debug(f"找到匹配的截图: {screenshot_path}")
                                 break

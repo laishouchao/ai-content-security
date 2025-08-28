@@ -16,7 +16,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from app.core.logging import TaskLogger
 from app.core.config import settings
@@ -36,7 +36,7 @@ class DomainScreenshotResult:
     file_size: int
     success: bool
     error_message: str = ""
-    captured_at: datetime = None
+    captured_at: Optional[datetime] = None
     
     def __post_init__(self):
         if self.captured_at is None:
@@ -275,7 +275,7 @@ class OptimizedScreenshotService:
                 screenshot_path=str(screenshot_path),
                 source_code_path=str(source_code_path),
                 page_title=page_title,
-                page_description=page_description,
+                page_description=str(page_description),
                 text_content=text_content,
                 content_hash=content_hash,
                 file_size=file_size,
@@ -344,8 +344,9 @@ class OptimizedScreenshotService:
                         page_title = soup.title.get_text()
                     
                     meta_desc = soup.find('meta', attrs={'name': 'description'})
-                    if meta_desc:
-                        page_description = meta_desc.get('content', '')
+                    if meta_desc and isinstance(meta_desc, Tag):
+                        content = meta_desc.get('content', '')
+                        page_description = str(content) if content else ''
                     
                     text_content = soup.get_text()[:5000]
             
@@ -355,7 +356,7 @@ class OptimizedScreenshotService:
                 screenshot_path=screenshot_path,
                 source_code_path=str(source_code_path),
                 page_title=page_title,
-                page_description=page_description,
+                page_description=str(page_description),
                 text_content=text_content,
                 content_hash=content_hash,
                 file_size=screenshot_file.stat().st_size,
