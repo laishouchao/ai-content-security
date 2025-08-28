@@ -21,6 +21,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 from app.core.logging import TaskLogger
 from app.core.config import settings
 from app.engines.ai_analysis import AIAnalysisEngine
+from app.engines.screenshot_engine import UniversalScreenshotEngine, ScreenshotConfig
 
 
 @dataclass
@@ -49,7 +50,7 @@ class ThirdPartyDomainResult:
     risk_level: Optional[str] = None
     confidence_score: float = 0.0
     description: Optional[str] = None
-    tags: List[str] = None
+    tags: List[str] = field(default_factory=list)
     ai_analysis_result: Optional[Dict[str, Any]] = None
     
     # 错误信息
@@ -114,85 +115,120 @@ class DomainAccessTester:
                 }
 
 
-class DomainContentCapturer:
-    """域名内容抓取器"""
+class EnhancedDomainContentCapturer:
+    """增强的域名内容抓取器，使用统一截图引擎"""
     
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, user_id: str):
         self.task_id = task_id
+        self.user_id = user_id
         self.screenshot_dir = Path(f"screenshots/{task_id}")
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         
+        # 初始化截图引擎
+        self.screenshot_engine = UniversalScreenshotEngine(task_id, user_id)
+        self.screenshot_config = ScreenshotConfig(
+            width=1280,
+            height=720,
+            full_page=False,
+            quality=90,
+            timeout=30,
+            wait_time=3.0,
+            retry_count=2
+        )
+        
+        self._engine_initialized = False
+        
+    async def _ensure_engine_initialized(self):
+        """确保截图引擎已初始化"""
+        if not self._engine_initialized:
+            await self.screenshot_engine.initialize(self.screenshot_config)
+            self._engine_initialized = True
+    
     async def capture_domain_content(self, domain: str, protocol: str = 'https') -> Dict[str, Any]:
-        """抓取域名内容和截图"""
+        """使用增强截图引擎抓取域名内容和截图"""
         url = f"{protocol}://{domain}"
         
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-dev-shm-usage']
-                )
+            # 确保截图引擎已初始化
+            await self._ensure_engine_initialized()
+            
+            # 生成截图文件名
+            screenshot_filename = f"{domain.replace('.', '_')}_{int(time.time())}.png"
+            screenshot_path = self.screenshot_dir / screenshot_filename
+            
+            # 使用统一截图引擎进行截图
+            screenshot_result = await self.screenshot_engine.capture_screenshot(
+                url, 
+                self.screenshot_config, 
+                str(screenshot_path)
+            )
+            
+            if screenshot_result.success:
+                # 提取页面内容信息
+                page_title = screenshot_result.page_title or ''
+                page_content = await self._extract_page_content(url)
                 
-                try:
-                    context = await browser.new_context(
-                        viewport={'width': 1280, 'height': 720},
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    )
-                    
-                    page = await context.new_page()
-                    
-                    # 设置超时时间
-                    page.set_default_timeout(30000)
-                    
-                    # 访问页面
-                    await page.goto(url, wait_until='networkidle', timeout=30000)
-                    
-                    # 等待页面加载完成
-                    await page.wait_for_timeout(3000)
-                    
-                    # 提取页面信息
-                    page_title = await page.title()
-                    
-                    # 获取meta description
-                    page_description = await page.evaluate('''
-                        () => {
-                            const meta = document.querySelector('meta[name="description"]');
-                            return meta ? meta.getAttribute('content') : '';
-                        }
-                    ''')
-                    
-                    # 获取页面文本内容（前2000字符）
-                    page_content = await page.evaluate('''
-                        () => {
-                            const text = document.body.innerText || document.body.textContent || '';
-                            return text.substring(0, 2000);
-                        }
-                    ''')
-                    
-                    # 截图
-                    screenshot_filename = f"{domain.replace('.', '_')}_{int(time.time())}.png"
-                    screenshot_path = self.screenshot_dir / screenshot_filename
-                    await page.screenshot(path=str(screenshot_path), full_page=False)
-                    
-                    # 计算内容哈希
-                    content_hash = hashlib.md5(page_content.encode('utf-8')).hexdigest()
-                    
-                    return {
-                        'title': page_title,
-                        'description': page_description,
-                        'content': page_content,
-                        'screenshot_path': str(screenshot_path),
-                        'content_hash': content_hash,
-                        'success': True
-                    }
-                    
-                finally:
-                    await browser.close()
-                    
-        except PlaywrightTimeoutError:
-            return {'success': False, 'error': '页面加载超时'}
+                # 计算内容哈希
+                content_hash = hashlib.md5(page_content.encode('utf-8')).hexdigest()
+                
+                return {
+                    'title': page_title,
+                    'description': page_content[:200] if page_content else '',  # 前200字符作为描述
+                    'content': page_content,
+                    'screenshot_path': str(screenshot_path),
+                    'content_hash': content_hash,
+                    'success': True,
+                    'file_size': screenshot_result.file_size,
+                    'response_time': screenshot_result.response_time,
+                    'final_url': screenshot_result.page_url
+                }
+            else:
+                return {
+                    'success': False, 
+                    'error': f'截图失败: {screenshot_result.error_message}'
+                }
+                
         except Exception as e:
             return {'success': False, 'error': f'抓取失败: {str(e)}'}
+    
+    async def _extract_page_content(self, url: str) -> str:
+        """使用HTTP请求提取页面文本内容"""
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            connector = aiohttp.TCPConnector(ssl=False, limit=10)
+            
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+                headers={'User-Agent': self.screenshot_config.user_agent}
+            ) as session:
+                
+                async with session.get(url, allow_redirects=True) as response:
+                    if response.status == 200 and 'text/html' in response.headers.get('Content-Type', ''):
+                        html_content = await response.text()
+                        
+                        # 简单的HTML文本提取
+                        import re
+                        # 移除script和style标签
+                        clean_html = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+                        clean_html = re.sub(r'<style[^>]*>.*?</style>', '', clean_html, flags=re.DOTALL | re.IGNORECASE)
+                        # 移除HTML标签
+                        text_content = re.sub(r'<[^>]+>', '', clean_html)
+                        # 清理多余空白
+                        text_content = re.sub(r'\s+', ' ', text_content).strip()
+                        
+                        return text_content[:2000]  # 限制在2000字符内
+                    else:
+                        return ''
+        except Exception as e:
+            return f'内容提取失败: {str(e)}'
+    
+    async def cleanup(self):
+        """清理资源"""
+        try:
+            await self.screenshot_engine.cleanup()
+        except Exception as e:
+            pass  # 忽略清理错误
 
 
 class ThirdPartyDomainClassifier:
@@ -316,7 +352,7 @@ class ThirdPartyDomainAnalyzer:
         
         # 初始化组件
         self.access_tester = DomainAccessTester()
-        self.content_capturer = DomainContentCapturer(task_id)
+        self.content_capturer = EnhancedDomainContentCapturer(task_id, user_id)
         
         # AI分析引擎（延迟初始化）
         self.ai_classifier: Optional[ThirdPartyDomainClassifier] = None
@@ -427,10 +463,21 @@ class ThirdPartyDomainAnalyzer:
         """确保AI分类器已初始化"""
         if self.ai_classifier is None:
             try:
-                ai_engine = AIAnalysisEngine(self.task_id, self.user_id)
+                # 使用简单的AI配置
+                from app.core.config import settings
+                ai_config = getattr(settings, 'DEFAULT_AI_CONFIG', {})
+                ai_engine = AIAnalysisEngine(self.task_id, ai_config)
                 self.ai_classifier = ThirdPartyDomainClassifier(ai_engine)
                 return True
             except Exception as e:
                 self.logger.warning(f"AI分类器初始化失败: {e}")
                 return False
         return True
+    
+    async def cleanup(self):
+        """清理所有资源"""
+        try:
+            await self.content_capturer.cleanup()
+            self.logger.info("第三方域名分析器资源清理完成")
+        except Exception as e:
+            self.logger.warning(f"清理第三方域名分析器资源失败: {e}")

@@ -68,12 +68,6 @@ export interface TaskConfig {
   max_crawl_iterations?: number
 }
 
-export interface TaskConfigPreset {
-  name: string
-  description: string
-  config: TaskConfig
-}
-
 export interface PerformanceMetrics {
   execution_time: number
   subdomains_discovered: number
@@ -230,11 +224,6 @@ class TaskAPI {
     system_status: Record<string, any>
   }>>> {
     return http.get('/tasks/stats')
-  }
-  
-  // 获取配置预设
-  async getConfigPresets(): Promise<AxiosResponse<ApiResponse<TaskConfigPreset[]>>> {
-    return http.get('/tasks/config/presets')
   }
   
   // 获取任务性能指标

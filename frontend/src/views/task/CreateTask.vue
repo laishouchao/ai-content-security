@@ -16,30 +16,6 @@
         <!-- 基本配置 -->
         <el-divider content-position="left">基本配置</el-divider>
         
-        <!-- 配置预设 -->
-        <el-form-item label="配置预设">
-          <el-select 
-            v-model="selectedPreset" 
-            placeholder="选择预设配置" 
-            @change="handlePresetChange"
-          >
-            <el-option
-              v-for="preset in configPresets"
-              :key="preset.name"
-              :label="preset.name"
-              :value="preset.name"
-            >
-              <div style="display: flex; flex-direction: column">
-                <span style="font-weight: 500">{{ preset.name }}</span>
-                <span style="font-size: 12px; color: #999">{{ preset.description }}</span>
-              </div>
-            </el-option>
-          </el-select>
-          <div class="form-tip">
-            🎯 选择预设配置快速设置参数，或手动调整配置
-          </div>
-        </el-form-item>
-        
         <el-form-item label="目标域名" prop="domain">
           <el-input
             v-model="taskForm.domain"
@@ -250,15 +226,13 @@ import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Lightning } from '@element-plus/icons-vue'
 import { taskAPI } from '@/api/task'
-import type { CreateTaskRequest, TaskConfigPreset } from '@/api/task'
+import type { CreateTaskRequest } from '@/api/task'
 
 const router = useRouter()
 
 // 响应式状态
 const submitting = ref(false)
 const taskFormRef = ref<FormInstance>()
-const selectedPreset = ref('')
-const configPresets = ref<TaskConfigPreset[]>([])
 
 const taskForm = reactive({
   domain: '',
@@ -297,51 +271,6 @@ const taskRules: FormRules = {
     { max: 100, message: '任务名称不能超过100个字符', trigger: 'blur' }
   ]
 }
-
-// 加载配置预设
-const loadConfigPresets = async () => {
-  try {
-    const response = await taskAPI.getConfigPresets()
-    if (response.data.success && response.data.data) {
-      configPresets.value = response.data.data
-    }
-  } catch (error) {
-    console.error('加载配置预设失败:', error)
-  }
-}
-
-// 处理预设配置变化
-const handlePresetChange = (presetName: string) => {
-  const preset = configPresets.value.find(p => p.name === presetName)
-  if (preset) {
-    // 应用预设配置到表单
-    const config = preset.config
-    taskForm.enableSubdomain = config.subdomain_discovery_enabled
-    taskForm.enableCrawling = config.link_crawling_enabled
-    taskForm.enableCapture = config.content_capture_enabled
-    taskForm.enableAI = config.ai_analysis_enabled
-    taskForm.maxSubdomains = config.max_subdomains
-    taskForm.crawlDepth = config.max_crawl_depth
-    taskForm.maxPages = config.max_pages_per_domain
-    taskForm.requestDelay = config.request_delay
-    taskForm.timeout = config.timeout
-    
-    // 性能优化配置
-    taskForm.useParallelExecutor = config.use_parallel_executor ?? true
-    taskForm.smartPrefilterEnabled = config.smart_prefilter_enabled ?? true
-    taskForm.dnsConcurrency = config.dns_concurrency ?? 100
-    taskForm.aiSkipThreshold = config.ai_skip_threshold ?? 0.3
-    taskForm.multiViewportCapture = config.multi_viewport_capture ?? false
-    taskForm.enableAggressiveCaching = config.enable_aggressive_caching ?? false
-    
-    ElMessage.success(`已应用预设配置: ${presetName}`)
-  }
-}
-
-// 组件挂载时加载预设
-onMounted(() => {
-  loadConfigPresets()
-})
 
 // 监听扫描模式变化
 watch(() => taskForm.scanMode, (newMode) => {
