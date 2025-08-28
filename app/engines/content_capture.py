@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from app.core.logging import TaskLogger
 from app.core.config import settings
+from app.engines.optimized_screenshot_service import OptimizedScreenshotService
 
 
 class ContentResult:
@@ -291,12 +292,41 @@ class ContentCaptureEngine:
         # 限制抓取数量
         urls_to_capture = urls[:max_captures]
         
-        # 使用截图服务
+        # 使用优化的截图服务
         if capture_screenshots:
-            async with ScreenshotService(self.task_id) as screenshot_service:
-                results = await self._capture_with_screenshots(
-                    urls_to_capture, domain, screenshot_service, config
+            async with OptimizedScreenshotService(self.task_id, self.user_id) as optimized_service:
+                # 提取域名列表，每个域名只截图一张
+                unique_domains = list(set([urlparse(url).netloc for url in urls_to_capture]))
+                
+                # 优化截图
+                screenshot_results = await optimized_service.capture_domains_optimized(
+                    unique_domains, config
                 )
+                
+                # 转换为ContentResult格式
+                for screenshot_result in screenshot_results:
+                    if screenshot_result.success:
+                        content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
+                        content_result.screenshot_path = screenshot_result.screenshot_path
+                        content_result.html_content = screenshot_result.text_content  # 使用提取的文本
+                        content_result.page_title = screenshot_result.page_title
+                        content_result.meta_description = screenshot_result.page_description
+                        content_result.text_content = screenshot_result.text_content
+                        content_result.set_content_hash(screenshot_result.text_content)
+                        content_result.file_size = screenshot_result.file_size
+                        content_result.status_code = 200
+                        content_result.capture_duration = time.time() - start_time
+                        
+                        results.append(content_result)
+                        self.captured_count += 1
+                    else:
+                        # 为失败的域名创建错误结果
+                        content_result = ContentResult(screenshot_result.url, screenshot_result.domain)
+                        content_result.error_message = screenshot_result.error_message
+                        content_result.status_code = 500
+                        
+                        results.append(content_result)
+                        self.failed_count += 1
         else:
             results = await self._capture_without_screenshots(
                 urls_to_capture, domain, config

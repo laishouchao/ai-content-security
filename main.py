@@ -204,6 +204,11 @@ app.include_router(domain_whitelist.router, prefix="/api/v1/domain-lists", tags=
 app.include_router(performance.router, prefix="/api/v1/performance", tags=["性能监控"])
 app.include_router(cache.router, prefix="/api/v1/cache", tags=["缓存管理"])
 
+# 添加单独的WebSocket路由，直接在/api/v1/ws访问
+# 这样前端就可以使用 ws://localhost:8000/api/v1/ws 连接
+from app.api.v1.websocket import websocket_endpoint
+app.websocket("/api/v1/ws")(websocket_endpoint)
+
 
 @app.get("/")
 async def root():
@@ -218,6 +223,16 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康检查"""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "environment": settings.ENVIRONMENT
+    }
+
+
+@app.get("/api/v1/health")
+async def health_check_v1():
+    """健康检查 - API v1 版本"""
     return {
         "status": "healthy",
         "timestamp": time.time(),

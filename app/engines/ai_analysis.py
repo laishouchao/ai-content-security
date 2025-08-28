@@ -14,6 +14,7 @@ from app.core.security import data_encryption
 from app.models.user import UserAIConfig
 from app.models.task import ThirdPartyDomain, ViolationRecord, RiskLevel
 from app.core.prometheus import record_ai_analysis, record_violation_detected, record_error
+from app.engines.ai_analysis_output_manager import AIAnalysisOutputManager
 
 
 class AIAnalysisResult:
@@ -212,6 +213,9 @@ class AIAnalysisEngine:
         self.ai_config = ai_config
         self.logger = TaskLogger(task_id, "ai_analysis")
         
+        # 初始化输出管理器
+        self.output_manager = AIAnalysisOutputManager(task_id, "ai_analysis")
+        
         # 配置验证 - 确保有有效的AI配置
         if not self.ai_config:
             raise ValueError("缺少用户AI配置")
@@ -243,15 +247,15 @@ class AIAnalysisEngine:
             try:
                 # 跳过已分析的域名
                 if domain.is_analyzed is True or (hasattr(domain.is_analyzed, 'value') and domain.is_analyzed.value is True):
-                    self.logger.debug(f"跳过已分析的域名: {domain.domain}")
+                    self.logger.debug(f"跳过已分析的域名: {str(domain.domain)}")
                     continue
                 
                 # 检查必要文件是否存在（改进的检查逻辑）
                 screenshot_path_value = str(domain.screenshot_path) if domain.screenshot_path is not None else ""
                 
                 # 使用改进的截图文件检查逻辑
-                if not self._robust_screenshot_check(screenshot_path_value, domain.domain):
-                    self.logger.warning(f"域名 {domain.domain} 没有有效的截图文件，跳过AI分析")
+                if not self._robust_screenshot_check(screenshot_path_value, str(domain.domain)):
+                    self.logger.warning(f"域名 {str(domain.domain)} 没有有效的截图文件，跳过AI分析")
                     # 更新域名状态
                     try:
                         setattr(domain, 'is_analyzed', True)
@@ -262,11 +266,12 @@ class AIAnalysisEngine:
                     continue
                 
                 # 如果找到了有效的截图文件，更新domain的screenshot_path为实际可用的路径
-                valid_path = self._get_valid_screenshot_path(screenshot_path_value, domain.domain)
+                valid_path = self._get_valid_screenshot_path(screenshot_path_value, str(domain.domain))
                 if valid_path:
-                    domain.screenshot_path = str(valid_path)
+                    # 使用setattr来设置属性，避免类型检查问题
+                    setattr(domain, 'screenshot_path', str(valid_path))
                 
-                self.logger.info(f"分析域名 ({i+1}/{len(domains)}): {domain.domain}")
+                self.logger.info(f"分析域名 ({i+1}/{len(domains)}): {str(domain.domain)}")
                 
                 # 执行AI分析
                 result = await self._analyze_single_domain(domain)
@@ -293,14 +298,14 @@ class AIAnalysisEngine:
                 await self._save_analysis_result_to_cache(domain, result)
                 
                 analyzed_count += 1
-                self.logger.info(f"完成分析: {domain.domain} (违规: {result.has_violation})")
+                self.logger.info(f"完成分析: {str(domain.domain)} (违规: {result.has_violation})")
                 
                 # 防止过快请求
                 if i < len(domains) - 1:
                     await asyncio.sleep(1)
                 
             except Exception as e:
-                self.logger.error(f"分析域名 {domain.domain} 失败: {e}")
+                self.logger.error(f"分析域名 {str(domain.domain)} 失败: {e}")
                 try:
                     setattr(domain, 'is_analyzed', True)
                     setattr(domain, 'analysis_error', str(e))
@@ -340,7 +345,7 @@ class AIAnalysisEngine:
                 
                 # 同时更新缓存库中的记录
                 cache_stmt = select(ThirdPartyDomainCache).where(
-                    ThirdPartyDomainCache.domain == domain.domain
+                    ThirdPartyDomainCache.domain == str(domain.domain)
                 )
                 cache_result = await db.execute(cache_stmt)
                 cache_record = cache_result.scalar_one_or_none()
@@ -374,12 +379,44 @@ class AIAnalysisEngine:
         try:
             start_time = time.time()
             
-            # 构建分析提示词
-            prompt = await self._build_analysis_prompt(domain)
-            
-            # 读取截图数据
+            # 获取截图和源码路径
             screenshot_path_value = str(domain.screenshot_path) if domain.screenshot_path is not None else ""
-            image_data = await self._read_image_as_base64(screenshot_path_value)
+            
+            # 查找对应的源码文件
+            source_code_path = ""
+            if screenshot_path_value:
+                screenshot_file = Path(screenshot_path_value)
+                source_code_dir = screenshot_file.parent.parent / "source_code" / self.task_id
+                safe_domain = self._make_safe_filename(str(domain.domain))
+                source_code_file = source_code_dir / f"{safe_domain}_source.html"
+                if source_code_file.exists():
+                    source_code_path = str(source_code_file)
+            
+            # 准备AI分析输入文件
+            input_file_path = await self.output_manager.prepare_analysis_input(
+                str(domain.domain),
+                screenshot_path_value,
+                source_code_path,
+                {
+                    'domain_type': getattr(domain, 'domain_type', 'unknown'),
+                    'page_title': getattr(domain, 'page_title', ''),
+                    'page_description': getattr(domain, 'page_description', '')
+                }
+            )
+            
+            # 读取输入数据
+            input_data = self.output_manager.load_input_data(input_file_path)
+            if not input_data:
+                raise ValueError("无法加载分析输入数据")
+            
+            # 构建分析提示词（结合截图和源码）
+            prompt = await self._build_enhanced_analysis_prompt(domain, input_data)
+            
+            # 获取截图数据
+            image_data = input_data.get('screenshot_base64', '')
+            if not image_data:
+                # 如果没有截图，创建一个默认图片
+                image_data = self._create_test_image_base64()
             
             # 调用AI API
             async with OpenAIClient(self.ai_config, self.logger) as client:
@@ -389,12 +426,84 @@ class AIAnalysisEngine:
             result = await self._parse_ai_response(ai_response, result, domain)
             result.analysis_duration = time.time() - start_time
             
+            # 保存分析输出文件
+            await self.output_manager.save_analysis_output(
+                str(domain.domain),
+                {
+                    'has_violation': result.has_violation,
+                    'violation_types': result.violation_types,
+                    'confidence_score': result.confidence_score,
+                    'risk_level': result.risk_level.value if hasattr(result.risk_level, 'value') else str(result.risk_level),
+                    'title': result.title,
+                    'description': result.description,
+                    'evidence': result.evidence,
+                    'recommendations': result.recommendations
+                },
+                result.ai_raw_response,
+                input_file_path
+            )
+            
         except Exception as e:
             result.error_message = str(e)
             result.has_violation = False
             self.logger.error(f"AI分析失败: {e}")
         
         return result
+    
+    async def _build_enhanced_analysis_prompt(self, domain: ThirdPartyDomain, input_data: Dict[str, Any]) -> str:
+        """构建增强的AI分析提示词（结合截图和源码）"""
+        
+        page_title = input_data.get('page_title', '')
+        page_description = input_data.get('page_description', '')
+        text_content = input_data.get('text_content', '')
+        source_code = input_data.get('source_code', '')
+        page_stats = input_data.get('page_stats', {})
+        
+        prompt = f"""请分析以下网站的安全性和合规性：
+
+**基本信息:**
+- 域名: {str(domain.domain)}
+- 页面标题: {page_title}
+- 页面描述: {page_description}
+- 域名类型: {getattr(domain, 'domain_type', 'unknown')}
+
+**页面统计:**
+- 链接数量: {page_stats.get('total_links', 0)}
+- 图片数量: {page_stats.get('total_images', 0)}
+- 脚本数量: {page_stats.get('total_scripts', 0)}
+- 表单数量: {page_stats.get('total_forms', 0)}
+- 是否有CSS: {page_stats.get('has_css', False)}
+
+**页面内容摘要:**
+{text_content[:1500]}
+
+**源码分析信息:**
+{source_code[:800] if source_code else '无源码信息'}
+
+**分析要求:**
+请结合提供的截图和上述信息，全面分析该网站是否存在以下问题：
+
+1. **内容安全问题**: 色情、暴力、赌博、毒品等不良内容
+2. **诈骗风险**: 虚假广告、网络诈骗、金融骗局等
+3. **恶意软件**: 恶意下载、欺骗插件、病毒传播等
+4. **侵权内容**: 盗版软件、未授权内容、商标侵权等
+5. **不当言论**: 仇恨言论、歧视内容、政治敏感内容等
+6. **隐私泄露**: 非法收集个人信息、数据泄露风险等
+7. **技术安全**: 网站漏洞、不安全的连接、恶意脚本等
+
+请特别注意分析截图中的视觉元素，如按钮、广告、弹窗等，以及源码中可能隐藏的风险代码。"""
+        
+        return prompt
+    
+    def _make_safe_filename(self, filename: str) -> str:
+        """生成安全的文件名"""
+        safe_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+        safe_filename = ''.join(c if c in safe_chars else '_' for c in filename)
+        
+        if len(safe_filename) > 50:
+            safe_filename = safe_filename[:50]
+        
+        return safe_filename or "unknown"
     
     async def _build_analysis_prompt(self, domain: ThirdPartyDomain) -> str:
         """构建AI分析提示词"""
@@ -436,7 +545,7 @@ class AIAnalysisEngine:
 """
         
         return template.format(
-            domain=domain.domain,
+            domain=str(domain.domain),
             found_on_url=domain.found_on_url[:200],  # 限制长度
             domain_type=domain.domain_type,
             page_title=str(domain.page_title) if domain.page_title is not None else "无标题",
@@ -494,7 +603,7 @@ class AIAnalysisEngine:
             if result.has_violation:
                 # 只有在置信度足够高时才认为是真正的违规
                 if result.confidence_score < 0.6:  # 60%以下的置信度不认为是违规
-                    self.logger.info(f"域名 {domain.domain} AI分析置信度过低 ({result.confidence_score*100:.1f}%)，不认为是违规")
+                    self.logger.info(f"域名 {str(domain.domain)} AI分析置信度过低 ({result.confidence_score*100:.1f}%)，不认为是违规")
                     result.has_violation = False
                     result.violation_types = []
                     result.risk_level = RiskLevel.LOW
@@ -600,7 +709,7 @@ class AIAnalysisEngine:
             return False
         
         # 详细日志记录
-        self.logger.debug(f"检查域名 {domain} 的截图路径: {screenshot_path}")
+        self.logger.debug(f"检查域名 {str(domain)} 的截图路径: {screenshot_path}")
         
         # 尝试多种路径检查方式
         check_paths = []
@@ -635,14 +744,14 @@ class AIAnalysisEngine:
                 # 检查文件大小，排除空文件
                 file_size = path.stat().st_size
                 if file_size > 100:  # 至少100字节，避免空文件或错误文件
-                    self.logger.info(f"域名 {domain} 截图文件找到: {desc} -> {path} ({file_size} 字节)")
+                    self.logger.info(f"域名 {str(domain)} 截图文件找到: {desc} -> {path} ({file_size} 字节)")
                     return True
                 else:
                     self.logger.debug(f"{desc} 文件太小，可能是错误文件: {path} ({file_size} 字节)")
             else:
                 self.logger.debug(f"{desc} 不存在或不是文件: {path}")
         
-        self.logger.warning(f"域名 {domain} 所有路径检查都失败: {screenshot_path}")
+        self.logger.warning(f"域名 {str(domain)} 所有路径检查都失败: {screenshot_path}")
         return False
     
     def _get_valid_screenshot_path(self, screenshot_path: str, domain: str) -> Optional[Path]:

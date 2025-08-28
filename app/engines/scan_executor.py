@@ -12,6 +12,7 @@ from app.engines.link_crawler import LinkCrawlerEngine, CrawlResult
 from app.engines.third_party_identifier import ThirdPartyIdentifierEngine, ThirdPartyDomainResult
 from app.engines.content_capture import ContentCaptureEngine, ContentResult
 from app.engines.ai_analysis import AIAnalysisEngine, AIAnalysisResult
+from app.engines.optimized_screenshot_service import OptimizedScreenshotService
 from app.websocket.handlers import task_monitor
 
 

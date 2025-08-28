@@ -52,15 +52,38 @@ class ServiceManager:
         logger.info(f"✅ Python版本: {python_version.major}.{python_version.minor}")
         
         # 检查Node.js
+        node_found = False
         try:
             result = subprocess.run(['node', '--version'], 
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 logger.info(f"✅ Node.js版本: {result.stdout.strip()}")
+                node_found = True
             else:
                 logger.warning("⚠️ Node.js未找到，前端服务可能无法启动")
         except (subprocess.TimeoutExpired, FileNotFoundError):
             logger.warning("⚠️ Node.js检查失败，前端服务可能无法启动")
+        
+        # 检查npm（如果Node.js存在的话）
+        if node_found:
+            npm_commands = ['npm']
+            if sys.platform == 'win32':
+                npm_commands = ['npm.cmd', 'npm']
+            
+            npm_found = False
+            for npm_cmd in npm_commands:
+                try:
+                    result = subprocess.run([npm_cmd, '--version'], 
+                                           capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        logger.info(f"✅ npm版本: {result.stdout.strip()}")
+                        npm_found = True
+                        break
+                except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+                    continue
+            
+            if not npm_found:
+                logger.warning("⚠️ npm未找到，前端服务可能无法启动")
         
         # 检查必要文件
         required_files = ['main.py', 'celery_app.py', 'frontend/package.json']
@@ -74,17 +97,48 @@ class ServiceManager:
     
     def test_redis_connection(self):
         """测试Redis连接"""
+        redis = None
         try:
             from app.core.config import settings
             import redis
             
             logger.info("测试Redis连接...")
-            r = redis.from_url(settings.CELERY_BROKER_URL)
+            
+            # 检查CELERY_BROKER_URL是否配置
+            broker_url = getattr(settings, 'CELERY_BROKER_URL', None)
+            if not broker_url:
+                logger.error("❌ CELERY_BROKER_URL未配置")
+                return False
+            
+            logger.info(f"连接Redis: {broker_url}")
+            
+            # 创建Redis连接
+            r = redis.from_url(broker_url)
+            
+            # 检查连接对象是否创建成功
+            if r is None:
+                logger.error("❌ Redis连接对象创建失败")
+                return False
+            
+            # 测试连接
             result = r.ping()
             logger.info(f"✅ Redis连接正常: {result}")
             return True
+            
+        except ImportError as e:
+            logger.error(f"❌ 导入模块失败: {e}")
+            return False
         except Exception as e:
-            logger.error(f"❌ Redis连接失败: {e}")
+            # 对于Redis相关的具体异常，检查异常类型
+            error_message = str(e)
+            if 'ConnectionError' in str(type(e)) or '连接' in error_message:
+                logger.error(f"❌ Redis连接错误: {e}")
+            elif 'TimeoutError' in str(type(e)) or '超时' in error_message:
+                logger.error(f"❌ Redis连接超时: {e}")
+            elif 'AttributeError' in str(type(e)):
+                logger.error(f"❌ 配置属性错误: {e}")
+            else:
+                logger.error(f"❌ Redis连接失败: {e}")
             return False
     
     def start_backend(self):
@@ -100,15 +154,23 @@ class ServiceManager:
                 "--reload"
             ]
             
+            # 不重定向输出，让后端服务直接输出到控制台
+            # 这样可以避免输出缓冲区满导致的进程阻塞
             self.processes['backend'] = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
                 cwd=project_root
             )
             
             logger.info("✅ 后端服务启动中... (http://localhost:8000)")
+            
+            # 等待一下让服务有时间启动
+            time.sleep(2)
+            
+            # 检查进程是否还在运行
+            if self.processes['backend'].poll() is not None:
+                logger.error(f"❌ 后端服务启动后立即退出 (return code: {self.processes['backend'].returncode})")
+                return False
+                
             return True
             
         except Exception as e:
@@ -139,15 +201,20 @@ class ServiceManager:
                 "--max-memory-per-child=200000"
             ]
             
+            # 不重定向输出，让Celery直接输出到控制台
             self.processes['celery'] = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
                 cwd=project_root
             )
             
             logger.info("✅ Celery Worker启动中...")
+            
+            # 检查进程是否还在运行
+            time.sleep(1)
+            if self.processes['celery'].poll() is not None:
+                logger.error(f"❌ Celery Worker启动后立即退出 (return code: {self.processes['celery'].returncode})")
+                return False
+                
             return True
             
         except Exception as e:
@@ -162,12 +229,31 @@ class ServiceManager:
             # 等待后端完全启动
             time.sleep(5)
             
-            # 检查npm是否可用
-            try:
-                subprocess.run(['npm', '--version'], 
-                             check=True, capture_output=True, timeout=10)
-            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                logger.error("❌ npm未找到，请安装Node.js")
+            # 检查npm是否可用（Windows平台需要特殊处理）
+            npm_commands = ['npm']
+            if sys.platform == 'win32':
+                npm_commands = ['npm.cmd', 'npm']
+            
+            npm_found = False
+            npm_version = None
+            
+            for npm_cmd in npm_commands:
+                try:
+                    result = subprocess.run([npm_cmd, '--version'], 
+                                           check=True, capture_output=True, 
+                                           text=True, timeout=10)
+                    npm_version = result.stdout.strip()
+                    npm_found = True
+                    logger.info(f"✅ npm版本: {npm_version} (命令: {npm_cmd})")
+                    break
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+            
+            if not npm_found:
+                logger.error("❌ npm未找到，请检查：")
+                logger.error("   1. Node.js是否正确安装")
+                logger.error("   2. npm是否在PATH环境变量中")
+                logger.error("   3. 在命令行中运行 'npm --version' 测试")
                 return False
             
             frontend_dir = project_root / "frontend"
@@ -175,22 +261,132 @@ class ServiceManager:
                 logger.error("❌ 前端目录不存在")
                 return False
             
-            cmd = ["npm", "run", "dev"]
+            # 使用找到的npm命令
+            npm_cmd = npm_commands[0] if npm_found else 'npm'
+            cmd = [npm_cmd, "run", "dev"]
             
+            # 不重定向输出，让前端服务直接输出到控制台
             self.processes['frontend'] = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
                 cwd=frontend_dir
             )
             
             logger.info("✅ 前端服务启动中... (http://localhost:5173)")
+            
+            # 检查进程是否还在运行
+            time.sleep(2)
+            if self.processes['frontend'].poll() is not None:
+                logger.error(f"❌ 前端服务启动后立即退出 (return code: {self.processes['frontend'].returncode})")
+                return False
+                
             return True
             
         except Exception as e:
             logger.error(f"❌ 前端服务启动失败: {e}")
             return False
+        
+    def check_service_health(self):
+        """检查服务健康状态"""
+        logger.info("📈 检查服务健康状态...")
+            
+        # 检查后端API健康状态
+        try:
+            import requests
+            response = requests.get('http://localhost:8000/api/v1/health', timeout=5)
+            if response.status_code == 200:
+                logger.info("✅ 后端API服务健康")
+                result = response.json()
+                if result.get('status') == 'healthy':
+                    logger.info("✅ 后端服务内部状态正常")
+            else:
+                logger.warning(f"⚠️ 后端API健康检查失败: {response.status_code}")
+                return False
+        except ImportError:
+            logger.warning("⚠️ requests模块未安装，跳过API健康检查")
+            return True  # 不因为缺少requests就失败
+        except Exception as e:
+            # 更通用的异常处理
+            error_type = type(e).__name__
+            if 'ConnectionError' in error_type or 'Timeout' in error_type:
+                logger.error(f"❌ 后端API连接失败: {e}")
+            else:
+                logger.error(f"❌ 后端API健康检查遇到错误 ({error_type}): {e}")
+            return False
+            
+        # 检查前端服务
+        try:
+            import requests
+            response = requests.get('http://localhost:5173', timeout=5)
+            if response.status_code == 200:
+                logger.info("✅ 前端服务健康")
+            else:
+                logger.warning(f"⚠️ 前端服务健康检查失败: {response.status_code}")
+        except ImportError:
+            pass  # 前端检查不是必须的
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.warning(f"⚠️ 前端服务无法访问 ({error_type}): {e}")
+                
+        return True
+        
+    def check_process_output(self):
+        """检查进程输出信息"""
+        for service_name, process in self.processes.items():
+            if process.poll() is not None:
+                logger.error(f"❌ {service_name} 服务意外退出 (return code: {process.returncode})")
+                    
+                # 由于我们不再重定向输出，所以无法读取stdout/stderr
+                # 但可以提供一些诊断信息
+                logger.error(f"❌ {service_name} 服务异常终止，请检查上方的日志输出")
+                    
+                return False
+        return True
+    
+    def diagnose_connection_issues(self):
+        """诊断连接问题"""
+        logger.info("🔍 进行连接问题诊断...")
+        
+        # 检查端口占用情况
+        try:
+            import socket
+            
+            # 检查8000端口
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', 8000))
+            sock.close()
+            if result == 0:
+                logger.info("✅ 端口8000可访问")
+            else:
+                logger.error(f"❌ 端口8000不可访问 (error code: {result})")
+            
+            # 检查5173端口
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', 5173))
+            sock.close()
+            if result == 0:
+                logger.info("✅ 端口5173可访问")
+            else:
+                logger.error(f"❌ 端口5173不可访问 (error code: {result})")
+                
+        except Exception as e:
+            logger.error(f"❌ 端口检查失败: {e}")
+        
+        # 检查进程状态
+        logger.info("🔍 检查进程状态:")
+        for service_name, process in self.processes.items():
+            if process.poll() is None:
+                logger.info(f"✅ {service_name}: 运行中 (PID: {process.pid})")
+            else:
+                logger.error(f"❌ {service_name}: 已退出 (return code: {process.returncode})")
+                
+                # 尝试读取错误输出
+                try:
+                    if hasattr(process, 'stdout') and process.stdout:
+                        output = process.stdout.read()
+                        if output:
+                            logger.error(f"{service_name} output: {output[-1000:]}")
+                except Exception as e:
+                    logger.warning(f"无法读取{service_name}输出: {e}")
     
     def monitor_services(self):
         """监控服务状态"""
@@ -260,6 +456,19 @@ class ServiceManager:
             # 等待所有服务完全启动
             logger.info("⏳ 等待所有服务完全启动...")
             time.sleep(8)
+            
+            # 检查进程状态
+            if not self.check_process_output():
+                logger.error("❌ 服务启动失败")
+                self.stop_all_services()
+                return False
+            
+            # 检查服务健康状态
+            if not self.check_service_health():
+                logger.error("❌ 服务健康检查失败")
+                self.diagnose_connection_issues()
+                self.stop_all_services()
+                return False
             
             # 显示启动完成信息
             logger.info("=" * 60)
