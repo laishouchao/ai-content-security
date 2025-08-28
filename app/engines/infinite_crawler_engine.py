@@ -36,6 +36,13 @@ from app.engines.infinite_iteration_controller import InfiniteIterationControlle
 from app.engines.third_party_access_manager import ThirdPartyAccessManager
 from app.engines.third_party_domain_analyzer import ThirdPartyDomainAnalyzer, ThirdPartyDomainResult
 from app.engines.ai_analysis import AIAnalysisEngine
+from app.engines.infinite_crawler_ai_engine import (
+    InfiniteCrawlerAIEngine, 
+    AIAnalysisConfig, 
+    DomainAnalysisRequest,
+    AIAnalysisResult,
+    create_ai_analysis_config_from_env
+)
 
 
 @dataclass
@@ -94,7 +101,8 @@ class InfiniteCrawlerEngine:
         self.smart_crawler = SmartLinkCrawler(task_id, user_id, target_domain)
         self.third_party_access_manager = ThirdPartyAccessManager(task_id, user_id)
         self.domain_analyzer = ThirdPartyDomainAnalyzer(task_id, user_id)
-        self.ai_engine: Optional[AIAnalysisEngine] = None
+        self.ai_engine: Optional[AIAnalysisEngine] = None  # 原始AI引擎（向后兼容）
+        self.crawler_ai_engine: Optional[InfiniteCrawlerAIEngine] = None  # 新的AI引擎
         
         # 无限迭代控制器
         self.iteration_controller = InfiniteIterationController(task_id, user_id, target_domain)
@@ -112,6 +120,45 @@ class InfiniteCrawlerEngine:
         self.max_domains_per_iteration = 200  # 每次迭代处理的最大域名数
         self.max_total_domains = 10000        # 全局最大域名数限制
         self.concurrent_crawlers = 20         # 并发爬虫数量
+        
+        # AI功能配置
+        self.ai_enabled = False
+        self.ai_config: Optional[AIAnalysisConfig] = None
+    
+    async def _ensure_ai_engine_initialized(self) -> bool:
+        """确保AI引擎已初始化"""
+        if self.crawler_ai_engine:
+            return True
+        
+        try:
+            # 尝试从环境变量创建AI配置
+            self.ai_config = await create_ai_analysis_config_from_env()
+            if not self.ai_config:
+                self.logger.warning("AI配置不可用，跳过AI分析")
+                return False
+            
+            # 初始化AI引擎
+            self.crawler_ai_engine = InfiniteCrawlerAIEngine(
+                self.task_id, 
+                self.user_id, 
+                self.ai_config
+            )
+            
+            await self.crawler_ai_engine.initialize()
+            self.ai_enabled = True
+            self.logger.info("AI分析引擎初始化成功")
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"AI引擎初始化失败: {e}")
+            self.ai_enabled = False
+            return False
+    
+    def configure_ai_analysis(self, ai_config: AIAnalysisConfig):
+        """配置AI分析参数"""
+        self.ai_config = ai_config
+        self.ai_enabled = True
+        self.logger.info("AI分析配置已更新")
         
     async def start_infinite_crawling(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -525,10 +572,10 @@ class InfiniteCrawlerEngine:
                 # 转换为SubdomainResult格式
                 subdomain_result = SubdomainResult(
                     subdomain=result.subdomain,
-                    method=result.discovery_method
+                    method=result.discovery_method,
+                    ip_address=result.ip_addresses[0] if result.ip_addresses else None
                 )
                 # 手动设置其他属性
-                subdomain_result.ip_addresses = result.ip_addresses
                 subdomain_result.is_accessible = result.is_accessible
                 subdomain_result.response_code = result.response_code
                 subdomain_result.response_time = result.response_time
@@ -711,6 +758,103 @@ class InfiniteCrawlerEngine:
                         f"失败 {access_summary['processing_summary']['failed_accesses']}, "
                         f"截图 {access_summary['processing_summary']['screenshots_captured']}, "
                         f"高风险 {self.total_violations_found}")
+        
+        # 执行AI分析（如果启用）
+        await self._perform_ai_analysis_on_third_party_domains(config)
+    
+    async def _perform_ai_analysis_on_third_party_domains(self, config: Dict[str, Any]):
+        """对第三方域名执行AI分析"""
+        # 检查AI功能是否启用
+        if not config.get('ai_analysis_enabled', False):
+            self.logger.info("跳过AI分析: AI功能未启用")
+            return
+        
+        # 初始化AI引擎
+        if not await self._ensure_ai_engine_initialized():
+            self.logger.warning("跳过AI分析: AI引擎初始化失败")
+            return
+        
+        # 收集需要AI分析的第三方域名
+        ai_analysis_requests = []
+        for domain_name, domain_info in self.all_domains.items():
+            if (domain_info.domain_type == 'third_party' and 
+                domain_info.is_accessible and
+                not hasattr(domain_info, 'ai_analysis_completed')):
+                
+                # 获取域名的分析结果
+                access_result = None
+                if domain_name in self.third_party_access_manager.completed_domains:
+                    access_result = self.third_party_access_manager.completed_domains[domain_name]
+                
+                # 创建AI分析请求
+                analysis_request = DomainAnalysisRequest(
+                    domain=domain_name,
+                    page_title=getattr(access_result.analysis_result, 'page_title', None) if access_result and access_result.analysis_result else None,
+                    page_description=getattr(access_result.analysis_result, 'page_description', None) if access_result and access_result.analysis_result else None,
+                    page_content=getattr(access_result.analysis_result, 'page_content', None) if access_result and access_result.analysis_result else None,
+                    screenshot_path=getattr(access_result.analysis_result, 'screenshot_path', None) if access_result and access_result.analysis_result else None,
+                    source_urls=domain_info.source_urls,
+                    discovery_method=domain_info.discovery_method
+                )
+                
+                ai_analysis_requests.append(analysis_request)
+        
+        if not ai_analysis_requests:
+            self.logger.info("无第三方域名需要AI分析")
+            return
+        
+        self.logger.info(f"开始AI分析: {len(ai_analysis_requests)} 个第三方域名")
+        
+        try:
+            # 执行批量AI分析
+            if not self.crawler_ai_engine:
+                self.logger.error("AI引擎未初始化")
+                return
+            
+            ai_results = await self.crawler_ai_engine.analyze_domains_batch(ai_analysis_requests)
+            
+            # 处理AI分析结果
+            ai_violations_found = 0
+            for ai_result in ai_results:
+                if ai_result.analysis_success:
+                    # 更新域名信息
+                    if ai_result.domain in self.all_domains:
+                        domain_info = self.all_domains[ai_result.domain]
+                        
+                        # 更新风险等级
+                        domain_info.risk_level = ai_result.risk_level
+                        
+                        # 标记AI分析完成
+                        setattr(domain_info, 'ai_analysis_completed', True)
+                        setattr(domain_info, 'ai_analysis_result', ai_result)
+                        
+                        # 统计高风险域名
+                        if ai_result.risk_level in ['high', 'critical']:
+                            ai_violations_found += 1
+                        
+                        # 统计违规域名
+                        if ai_result.has_violations:
+                            self.total_violations_found += 1
+                            self.logger.warning(f"发现违规域名: {ai_result.domain} - {ai_result.violation_types}")
+                        
+                        self.logger.debug(f"域名 {ai_result.domain} AI分析完成: 风险{ai_result.risk_level}, 置信度{ai_result.confidence_score:.2f}")
+                else:
+                    self.logger.warning(f"域名 {ai_result.domain} AI分析失败: {ai_result.error_message}")
+            
+            # 获取AI分析统计
+            ai_stats = {}
+            if self.crawler_ai_engine:
+                ai_stats = self.crawler_ai_engine.get_analysis_statistics()
+            
+            self.logger.info(f"AI分析完成: "
+                            f"成功 {ai_stats['successful_requests']}/{ai_stats['total_requests']}, "
+                            f"高风险 {ai_violations_found}, "
+                            f"违规 {self.total_violations_found}, "
+                            f"API调用 {ai_stats['api_calls_made']}, "
+                            f"缓存命中率 {ai_stats['cache_hit_rate']:.2f}")
+            
+        except Exception as e:
+            self.logger.error(f"AI分析异常: {e}")
     
     async def _should_stop_iteration(self, new_domains_count: int, iteration_count: int) -> bool:
         """判断是否应该停止迭代"""
@@ -796,6 +940,8 @@ class InfiniteCrawlerEngine:
             ]
         }
         
+        return result
+        
     async def _generate_enhanced_final_result(self, total_duration: float) -> Dict[str, Any]:
         """生成增强的最终结果"""
         # 获取基本结果
@@ -804,10 +950,67 @@ class InfiniteCrawlerEngine:
         # 添加迭代控制器的统计信息
         iteration_summary = self.iteration_controller.get_iteration_summary()
         
+        # 获取AI分析统计信息
+        ai_analysis_summary = {}
+        try:
+            if self.crawler_ai_engine:
+                ai_stats = self.crawler_ai_engine.get_analysis_statistics()
+                ai_analysis_summary = {
+                    'ai_enabled': self.ai_enabled,
+                    'total_ai_requests': ai_stats.get('total_requests', 0),
+                    'successful_ai_requests': ai_stats.get('successful_requests', 0),
+                    'failed_ai_requests': ai_stats.get('failed_requests', 0),
+                    'ai_success_rate': ai_stats.get('success_rate', 0),
+                    'ai_cache_hit_rate': ai_stats.get('cache_hit_rate', 0),
+                    'total_api_calls': ai_stats.get('api_calls_made', 0),
+                    'total_tokens_used': ai_stats.get('tokens_used', 0),
+                    'average_processing_time': ai_stats.get('average_processing_time', 0)
+                }
+            else:
+                ai_analysis_summary = {
+                    'ai_enabled': False,
+                    'reason': '未AI引擎初始化或配置不可用'
+                }
+        except Exception as e:
+            self.logger.warning(f"获取AI分析统计失败: {e}")
+            ai_analysis_summary = {'ai_enabled': False, 'error': str(e)}
+        
+        # 获取第三方访问管理器的统计信息
+        third_party_access_summary = {}
+        try:
+            if hasattr(self.third_party_access_manager, 'get_processing_status'):
+                access_status = self.third_party_access_manager.get_processing_status()
+                third_party_access_summary = {
+                    'total_accessed': access_status.get('total_accessed', 0),
+                    'successful_accesses': access_status.get('completed_count', 0),
+                    'failed_accesses': access_status.get('failed_count', 0),
+                    'success_rate': access_status.get('success_rate', 0),
+                    'screenshots_captured': getattr(self.third_party_access_manager, 'total_screenshots', 0),
+                    'content_captured': getattr(self.third_party_access_manager, 'total_content_captured', 0)
+                }
+        except Exception as e:
+            self.logger.warning(f"获取第三方访问统计失败: {e}")
+        third_party_access_summary = {}
+        try:
+            if hasattr(self.third_party_access_manager, 'get_processing_status'):
+                access_status = self.third_party_access_manager.get_processing_status()
+                third_party_access_summary = {
+                    'total_accessed': access_status.get('total_accessed', 0),
+                    'successful_accesses': access_status.get('completed_count', 0),
+                    'failed_accesses': access_status.get('failed_count', 0),
+                    'success_rate': access_status.get('success_rate', 0),
+                    'screenshots_captured': getattr(self.third_party_access_manager, 'total_screenshots', 0),
+                    'content_captured': getattr(self.third_party_access_manager, 'total_content_captured', 0)
+                }
+        except Exception as e:
+            self.logger.warning(f"获取第三方访问统计失败: {e}")
+        
         # 增强结果
         enhanced_result = {
             **base_result,
             'infinite_iteration_metrics': iteration_summary,
+            'third_party_access_metrics': third_party_access_summary,
+            'ai_analysis_metrics': ai_analysis_summary,
             'adaptive_optimization': {
                 'final_batch_size': self.max_domains_per_iteration,
                 'final_concurrent_limit': self.concurrent_crawlers,
@@ -997,3 +1200,43 @@ class InfiniteCrawlerEngine:
             
         except Exception as e:
             self.logger.error(f"保存爬取结果失败: {e}")
+    
+    async def cleanup(self):
+        """清理所有资源"""
+        self.logger.info("开始清理无限迭代爬虫引擎资源")
+        
+        try:
+            # 清理AI引擎
+            if self.crawler_ai_engine:
+                await self.crawler_ai_engine.cleanup()
+                self.crawler_ai_engine = None
+            
+            # 清理第三方访问管理器
+            if self.third_party_access_manager:
+                await self.third_party_access_manager.cleanup()
+            
+            # 清理其他组件（如果有cleanup方法）
+            components_to_cleanup = [
+                self.enhanced_subdomain_engine,
+                self.domain_extractor, 
+                self.smart_crawler,
+                self.domain_analyzer
+            ]
+            
+            for component in components_to_cleanup:
+                if component and hasattr(component, 'cleanup'):
+                    try:
+                        await component.cleanup()
+                    except Exception as e:
+                        self.logger.warning(f"组件清理异常: {e}")
+            
+            # 清理队列和缓存
+            self.subdomain_discovery_queue.clear()
+            self.content_crawl_queue.clear()
+            self.ai_analysis_queue.clear()
+            self.all_domains.clear()
+            
+            self.logger.info("无限迭代爬虫引擎资源清理完成")
+            
+        except Exception as e:
+            self.logger.error(f"资源清理异常: {e}")
