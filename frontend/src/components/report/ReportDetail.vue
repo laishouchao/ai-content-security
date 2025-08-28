@@ -39,13 +39,13 @@
           <div class="card-header">
             <span>违规记录</span>
             <div class="header-controls">
-              <el-select v-model="violationFilter.risk_level" placeholder="风险等级" clearable size="small" style="width: 60px">
+              <el-select v-model="violationFilter.risk_level" placeholder="风险等级" clearable size="small">
                 <el-option label="严重" value="critical" />
                 <el-option label="高" value="high" />
                 <el-option label="中" value="medium" />
                 <el-option label="低" value="low" />
               </el-select>
-              <el-select v-model="violationFilter.violation_type" placeholder="违规类型" clearable size="small" style="width: 60px">
+              <el-select v-model="violationFilter.violation_type" placeholder="违规类型" clearable size="small">
                 <el-option label="恶意软件" value="malware" />
                 <el-option label="钓鱼网站" value="phishing" />
                 <el-option label="违法内容" value="illegal_content" />

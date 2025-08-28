@@ -26,7 +26,7 @@
     <el-card class="filter-card">
       <el-form inline>
         <el-form-item label="任务状态">
-          <el-select v-model="filters.status" placeholder="选择状态" clearable style="width: 60px">
+          <el-select v-model="filters.status" placeholder="选择状态" clearable>
             <el-option label="全部" value="" />
             <el-option label="等待中" value="pending" />
             <el-option label="运行中" value="running" />

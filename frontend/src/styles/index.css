@@ -249,6 +249,22 @@ a:hover {
 .user-select-all { user-select: all; }
 .user-select-auto { user-select: auto; }
 
+/* Element Plus 组件全局样式覆盖 */
+
+/* el-select 下拉选择框统一宽度 */
+.el-select {
+  width: 60px !important;
+}
+
+.el-select__wrapper {
+  width: 60px !important;
+}
+
+/* 确保下拉面板不受宽度限制 */
+.el-select__popper {
+  min-width: 60px;
+}
+
 /* 滚动条样式 */
 .scrollbar::-webkit-scrollbar {
   width: 6px;

@@ -130,7 +130,6 @@
           allow-create
           placeholder="输入允许扫描的域名"
           class="domain-select"
-          style="width: 60px"
           @change="handleConfigChange"
         >
           <el-option
@@ -154,7 +153,6 @@
           allow-create
           placeholder="输入需要阻止的域名"
           class="domain-select"
-          style="width: 60px"
           @change="handleConfigChange"
         >
           <el-option

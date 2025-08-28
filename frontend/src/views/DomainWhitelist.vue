@@ -82,7 +82,7 @@
     <el-card class="filter-card">
       <el-form :model="filters" inline>
         <el-form-item label="列表类型">
-          <el-select v-model="filters.list_type" placeholder="选择类型" clearable style="width: 60px">
+          <el-select v-model="filters.list_type" placeholder="选择类型" clearable>
             <el-option label="全部" value="" />
             <el-option label="白名单" value="whitelist" />
             <el-option label="黑名单" value="blacklist" />
@@ -90,7 +90,7 @@
         </el-form-item>
         
         <el-form-item label="作用域">
-          <el-select v-model="filters.scope" placeholder="选择作用域" clearable style="width: 60px">
+          <el-select v-model="filters.scope" placeholder="选择作用域" clearable>
             <el-option label="全部" value="" />
             <el-option label="全局" value="global" />
             <el-option label="用户" value="user" />
@@ -99,7 +99,7 @@
         </el-form-item>
         
         <el-form-item label="状态">
-          <el-select v-model="filters.is_active" placeholder="选择状态" clearable style="width: 60px">
+          <el-select v-model="filters.is_active" placeholder="选择状态" clearable>
             <el-option label="全部" value="" />
             <el-option label="启用" :value="true" />
             <el-option label="禁用" :value="false" />
@@ -262,7 +262,7 @@
         </el-form-item>
         
         <el-form-item label="作用域" prop="scope">
-          <el-select v-model="createForm.scope" placeholder="选择作用域" style="width: 60px">
+          <el-select v-model="createForm.scope" placeholder="选择作用域">
             <el-option label="用户级别" value="user" />
             <el-option label="全局级别" value="global" />
           </el-select>
