@@ -15,7 +15,7 @@ from app.core.logging import TaskLogger
 from app.core.database import AsyncSessionLocal
 from app.models.domain import DomainRecord, DomainCategory, DomainStatus, DiscoveryMethod, RiskLevel
 from app.engines.link_crawler import LinkCrawlerEngine
-from sqlalchemy import select, update, and_, or_
+from sqlalchemy import select, update, and_, or_, func
 
 
 @dataclass 

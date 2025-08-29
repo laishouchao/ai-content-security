@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.logging import logger
 from app.models.domain import DomainRecord
+from app.models.task import ScanTask, TaskLog, ViolationRecord
 
 
 class CacheManager:

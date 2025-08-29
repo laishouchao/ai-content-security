@@ -17,7 +17,7 @@ import asyncio
 import time
 import os
 import base64
-from typing import Dict, List, Set, Optional, Any, Union, Tuple
+from typing import Dict, List, Set, Optional, Any, Union, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -27,18 +27,22 @@ import json
 
 from app.core.logging import TaskLogger
 
-# 尝试导入Playwright
+# 类型检查时导入真实类型
+if TYPE_CHECKING:
+    from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+
+# 运行时尝试导入
 try:
     from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    # 定义占位类型
-    class Playwright: pass
-    class Browser: pass
-    class BrowserContext: pass
-    class Page: pass
+    # 定义占位变量
     async_playwright = None
+    Browser = Any
+    BrowserContext = Any  
+    Page = Any
+    Playwright = Any
 
 # 尝试导入Selenium作为备用
 try:
@@ -115,9 +119,9 @@ class PlaywrightScreenshotEngine:
         self.user_id = user_id
         self.logger = TaskLogger(task_id, user_id)
         
-        self.playwright: Optional[Playwright] = None
-        self.browser: Optional[Browser] = None
-        self.contexts: List[BrowserContext] = []
+        self.playwright: Optional['Playwright'] = None  # type: ignore
+        self.browser: Optional['Browser'] = None  # type: ignore
+        self.contexts: List['BrowserContext'] = []  # type: ignore
         
         # 黑名单域名，避免截图
         self.blacklist_domains = {
@@ -128,10 +132,10 @@ class PlaywrightScreenshotEngine:
     async def initialize(self, config: ScreenshotConfig):
         """初始化Playwright"""
         try:
-            self.playwright = await async_playwright().start()
+            self.playwright = await async_playwright().start()  # type: ignore
             
             # 启动浏览器
-            self.browser = await self.playwright.chromium.launch(
+            self.browser = await self.playwright.chromium.launch(  # type: ignore
                 headless=True,
                 args=[
                     '--no-sandbox',
@@ -154,9 +158,9 @@ class PlaywrightScreenshotEngine:
             self.logger.error(f"Playwright初始化失败: {e}")
             raise e
     
-    async def create_context(self, config: ScreenshotConfig) -> BrowserContext:
+    async def create_context(self, config: ScreenshotConfig) -> 'BrowserContext':  # type: ignore
         """创建浏览器上下文"""
-        context = await self.browser.new_context(
+        context = await self.browser.new_context(  # type: ignore
             viewport={'width': config.width, 'height': config.height},
             user_agent=config.user_agent,
             java_script_enabled=config.enable_javascript,
@@ -245,7 +249,7 @@ class PlaywrightScreenshotEngine:
     
     async def _capture_single_screenshot(
         self, 
-        page: Page, 
+        page: 'Page',  # type: ignore
         url: str, 
         config: ScreenshotConfig,
         output_path: Optional[str] = None
@@ -479,7 +483,7 @@ class SeleniumScreenshotEngine:
         if not SELENIUM_AVAILABLE:
             raise Exception("Selenium不可用")
             
-        chrome_options = ChromeOptions()
+        chrome_options = ChromeOptions()  # type: ignore
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
@@ -494,7 +498,7 @@ class SeleniumScreenshotEngine:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        driver = webdriver.Chrome(options=chrome_options)
+        driver = webdriver.Chrome(options=chrome_options)  # type: ignore
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         self.drivers.append(driver)
@@ -518,8 +522,8 @@ class SeleniumScreenshotEngine:
             
             # 等待页面加载
             if config.wait_for_load:
-                WebDriverWait(driver, config.timeout).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                WebDriverWait(driver, config.timeout).until(  # type: ignore
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))  # type: ignore
                 )
             
             # 额外等待
@@ -607,7 +611,7 @@ class UniversalScreenshotEngine:
     async def initialize(self, config: ScreenshotConfig):
         """初始化引擎"""
         if self.engine and hasattr(self.engine, 'initialize'):
-            await self.engine.initialize(config)
+            await self.engine.initialize(config)  # type: ignore
     
     async def capture_screenshot(
         self, 
@@ -643,7 +647,7 @@ class UniversalScreenshotEngine:
             )
         
         if hasattr(self.engine, 'batch_screenshot'):
-            return await self.engine.batch_screenshot(urls, config, output_dir, max_concurrent)
+            return await self.engine.batch_screenshot(urls, config, output_dir, max_concurrent)  # type: ignore
         else:
             # 为Selenium引擎实现批量截图
             return await self._fallback_batch_screenshot(urls, config, output_dir, max_concurrent)
@@ -666,7 +670,7 @@ class UniversalScreenshotEngine:
             async with semaphore:
                 output_filename = f"screenshot_{int(time.time())}_{len(results)}.png"
                 output_path = os.path.join(output_dir, output_filename)
-                return await self.engine.capture_screenshot(url, config, output_path)
+                return await self.engine.capture_screenshot(url, config, output_path)  # type: ignore
         
         tasks = [screenshot_with_semaphore(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)

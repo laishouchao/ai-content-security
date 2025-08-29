@@ -198,14 +198,14 @@ async def upload_avatar(
     """上传用户头像"""
     try:
         # 验证文件类型
-        if not file.content_type.startswith('image/'):
+        if not file.content_type or not file.content_type.startswith('image/'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="只能上传图片文件"
             )
         
         # 验证文件大小（2MB）
-        if file.size > 2 * 1024 * 1024:
+        if file.size and file.size > 2 * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="文件大小不能超过 2MB"
@@ -230,9 +230,13 @@ async def upload_avatar(
         
         # 更新用户头像地址
         user_service = UserService(db)
-        await user_service.update_user(str(current_user.id), {
-            "avatar_url": avatar_url
-        })
+        user_update_data = UserUpdate(
+            email=None,
+            full_name=None,
+            bio=None,
+            avatar_url=avatar_url
+        )
+        await user_service.update_user(str(current_user.id), user_update_data)
         
         logger.info(f"用户头像上传成功: {current_user.username}")
         return {

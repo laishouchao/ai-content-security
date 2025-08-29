@@ -945,6 +945,7 @@ class ScanTaskExecutor:
         try:
             from app.core.database import AsyncSessionLocal
             from app.models.domain import DomainRecord
+            from app.models.task import ScanTask
             from sqlalchemy import update
             
             async with AsyncSessionLocal() as db:
@@ -1075,6 +1076,7 @@ class ScanTaskExecutor:
         try:
             from app.core.database import AsyncSessionLocal
             from app.models.domain import DomainRecord
+            from app.models.task import ScanTask
             from sqlalchemy import update
             
             async with AsyncSessionLocal() as db:

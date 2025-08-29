@@ -104,7 +104,8 @@ class RedisDistributedLock:
         """
         
         try:
-            result = await self.redis.eval(lua_script, 1, self.key, self.token)
+            # 使用正确的参数顺序：script, numkeys, key1, key2, ..., arg1, arg2, ...
+            result = await self.redis.eval(lua_script, 1, self.key, self.token)  # type: ignore
             if result:
                 self._acquired = False
                 logger.debug(f"成功释放Redis锁: {self.key}")
@@ -138,9 +139,8 @@ class RedisDistributedLock:
         """
         
         try:
-            result = await self.redis.eval(
-                lua_script, 1, self.key, self.token, int(extend_time)
-            )
+            # 使用正确的参数顺序：script, numkeys, key1, key2, ..., arg1, arg2, ...
+            result = await self.redis.eval(lua_script, 1, self.key, self.token, str(extend_time))  # type: ignore
             if result:
                 logger.debug(f"成功延长Redis锁过期时间: {self.key}")
                 return True

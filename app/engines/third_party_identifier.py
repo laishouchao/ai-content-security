@@ -451,6 +451,9 @@ class ThirdPartyIdentifierEngine:
         except Exception as e:
             self.logger.warning(f"域名关系检查失败 {domain} vs {target_domain}: {e}")
             # 如果解析失败，回退到基本字符串匹配
+            # 重新定义变量以防在异常发生前未定义
+            domain_lower = domain.lower().strip()
+            target_lower = target_domain.lower().strip()
             return (domain_lower == target_lower or 
                     domain_lower.endswith(f'.{target_lower}') or
                     target_lower.endswith(f'.{domain_lower}'))

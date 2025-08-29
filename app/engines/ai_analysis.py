@@ -506,7 +506,7 @@ class AIAnalysisEngine:
         
         return safe_filename or "unknown"
     
-    async def _build_analysis_prompt(self, domain: ThirdPartyDomain) -> str:
+    async def _build_analysis_prompt(self, domain: DomainRecord) -> str:
         """构建AI分析提示词"""
         custom_template_value = str(self.ai_config.custom_prompt_template) if self.ai_config.custom_prompt_template is not None else ""
         template = custom_template_value if custom_template_value != "" else """
@@ -562,7 +562,7 @@ class AIAnalysisEngine:
         except Exception as e:
             raise ValueError(f"读取截图文件失败: {e}")
     
-    async def _parse_ai_response(self, ai_response: Dict[str, Any], result: AIAnalysisResult, domain: ThirdPartyDomain) -> AIAnalysisResult:
+    async def _parse_ai_response(self, ai_response: Dict[str, Any], result: AIAnalysisResult, domain: DomainRecord) -> AIAnalysisResult:
         """解析AI响应"""
         try:
             # 保存原始响应
@@ -645,7 +645,7 @@ class AIAnalysisEngine:
         }
         return risk_mapping.get(risk_level_str.lower(), RiskLevel.LOW)
     
-    async def _create_violation_record(self, domain: ThirdPartyDomain, result: AIAnalysisResult) -> ViolationRecord:
+    async def _create_violation_record(self, domain: DomainRecord, result: AIAnalysisResult) -> ViolationRecord:
         """创建违规记录"""
         violation = ViolationRecord(
             task_id=self.task_id,

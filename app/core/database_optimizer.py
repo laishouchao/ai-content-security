@@ -1,6 +1,6 @@
 """
 数据库操作优化工具类
-提供批量操作、查询优化、连接池管理等功能
+提供批量操作,查询优化,连接池管理等功能
 """
 
 import asyncio
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from app.core.database import AsyncSessionLocal, Base
 from app.core.logging import logger
 
-T = TypeVar('T', bound=Base)
+T = TypeVar('T', bound=Any)
 
 
 class DatabaseOptimizer:
@@ -250,7 +250,7 @@ class DatabaseOptimizer:
                 query = query.limit(limit)
             
             result = await self.db.execute(query)
-            return result.scalars().all()
+            return list(result.scalars().all())
         
         except Exception as e:
             logger.error(f"优化查询失败: {e}")

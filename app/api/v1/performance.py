@@ -502,7 +502,7 @@ async def get_performance_metrics(
         memory_data = []
         disk_data = []
         
-        for i in range(points):
+        for i in range(points):  # pyright: ignore[reportCallIssue]
             time_point = now - timedelta(minutes=interval_minutes * (points - 1 - i))
             timestamps.append(time_point.strftime('%H:%M'))
             
