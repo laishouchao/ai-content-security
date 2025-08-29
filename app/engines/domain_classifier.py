@@ -311,13 +311,10 @@ class DomainClassifier:
             classification.features.add('deep_subdomain')
     
     def _check_target_relationship(self, classification: DomainClassification):
-        """检查与目标域名的关系"""
+        """检查与目标域名的关系（强化版本）"""
         domain = classification.domain
         
         try:
-            extracted = tldextract.extract(domain)
-            domain_registered = extracted.registered_domain.lower()
-            
             # 完全匹配目标域名
             if domain == self.target_domain:
                 classification.domain_type = DomainType.TARGET_MAIN
@@ -326,7 +323,7 @@ class DomainClassifier:
                 classification.classification_reasons.append("完全匹配目标域名")
                 return
             
-            # 目标域名的子域名
+            # 目标域名的子域名（基本检查）
             if domain.endswith('.' + self.target_domain):
                 classification.domain_type = DomainType.TARGET_SUBDOMAIN
                 classification.is_target_related = True
@@ -336,11 +333,34 @@ class DomainClassifier:
                 classification.features.add('target_subdomain')
                 return
             
+            # 使用tldextract进行精确的域名解析
+            extracted = tldextract.extract(domain)
+            domain_registered = extracted.registered_domain.lower()
+            
             # 相同注册域名
             if domain_registered == self.target_registered_domain:
-                classification.is_target_related = True
+                # 如果有子域名，则是目标域名的子域名
+                if extracted.subdomain:
+                    classification.domain_type = DomainType.TARGET_SUBDOMAIN
+                    classification.is_target_related = True
+                    classification.is_subdomain = True
+                    classification.priority = DomainPriority.CRITICAL
+                    classification.classification_reasons.append("目标域名的子域名（精确解析）")
+                    classification.features.add('target_subdomain')
+                else:
+                    # 没有子域名，是主域名
+                    classification.domain_type = DomainType.TARGET_MAIN
+                    classification.is_target_related = True
+                    classification.priority = DomainPriority.CRITICAL
+                    classification.classification_reasons.append("目标域名本身（精确解析）")
+                
                 classification.features.add('same_registered_domain')
-                classification.classification_reasons.append("相同注册域名")
+                return
+            
+            # 如果没有匹配，记录调试信息
+            self.logger.debug(f"域名 {domain} 与目标域名 {self.target_domain} 不相关")
+            self.logger.debug(f"  - 域名注册域: {domain_registered}")
+            self.logger.debug(f"  - 目标注册域: {self.target_registered_domain}")
         
         except Exception as e:
             self.logger.debug(f"目标关系检查失败 {domain}: {e}")

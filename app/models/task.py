@@ -105,8 +105,7 @@ class ScanTask(Base):
     # 关联关系
     user = relationship("User", back_populates="scan_tasks")
     task_logs = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")
-    subdomains = relationship("SubdomainRecord", back_populates="task", cascade="all, delete-orphan")
-    third_party_domains = relationship("ThirdPartyDomain", back_populates="task", cascade="all, delete-orphan")
+    domains = relationship("DomainRecord", back_populates="task", cascade="all, delete-orphan")  # 新的统一域名表
     violations = relationship("ViolationRecord", back_populates="task", cascade="all, delete-orphan")
     
     def __repr__(self):
@@ -193,94 +192,13 @@ class TaskLog(Base):
         return f"<TaskLog(id={self.id}, task_id={self.task_id}, level={self.level})>"
 
 
-class SubdomainRecord(Base):
-    """子域名记录模型"""
-    __tablename__ = "subdomain_records"
-    
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    task_id = Column(String(36), ForeignKey("scan_tasks.id"), nullable=False, index=True)
-    
-    # 子域名信息
-    subdomain = Column(String(255), nullable=False, index=True)
-    ip_address = Column(String(45), nullable=True)  # IPv4 or IPv6
-    discovery_method = Column(String(50), nullable=False)
-    
-    # 状态信息
-    is_accessible = Column(Boolean, default=False, nullable=False)
-    response_code = Column(Integer, nullable=True)
-    response_time = Column(Float, nullable=True)  # 响应时间（秒）
-    
-    # 技术信息
-    server_header = Column(String(255), nullable=True)
-    content_type = Column(String(100), nullable=True)
-    page_title = Column(String(500), nullable=True)
-    
-    # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
-    # 关联关系
-    task = relationship("ScanTask", back_populates="subdomains")
-    
-    def __repr__(self):
-        return f"<SubdomainRecord(id={self.id}, subdomain={self.subdomain})>"
-
-
-class ThirdPartyDomain(Base):
-    """第三方域名模型"""
-    __tablename__ = "third_party_domains"
-    
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    task_id = Column(String(36), ForeignKey("scan_tasks.id"), nullable=False, index=True)
-    
-    # 域名信息
-    domain = Column(String(255), nullable=False, index=True)
-    found_on_url = Column(Text, nullable=False)
-    domain_type = Column(String(50), default=DomainType.UNKNOWN, nullable=False)
-    
-    # 风险信息
-    risk_level = Column(String(20), default=RiskLevel.LOW, nullable=False)
-    
-    # 内容信息
-    page_title = Column(String(500), nullable=True)
-    page_description = Column(Text, nullable=True)
-    content_hash = Column(String(64), nullable=True)  # 内容哈希用于去重
-    
-    # 文件路径
-    screenshot_path = Column(String(500), nullable=True)
-    html_content_path = Column(String(500), nullable=True)
-    
-    # 分析状态
-    is_analyzed = Column(Boolean, default=False, nullable=False)
-    analysis_error = Column(Text, nullable=True)
-    
-    # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    analyzed_at = Column(DateTime, nullable=True)
-    
-    # 添加用于缓存的字段
-    last_identified_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 最后识别时间
-    cached_analysis_result = Column(JSON, nullable=True)  # 缓存的分析结果
-    
-    # 关联关系
-    task = relationship("ScanTask", back_populates="third_party_domains")
-    violations = relationship("ViolationRecord", back_populates="domain", cascade="all, delete-orphan")
-    
-    def __repr__(self):
-        return f"<ThirdPartyDomain(id={self.id}, domain={self.domain}, type={self.domain_type})>"
-    
-    @property
-    def has_violations(self) -> bool:
-        """检查是否有违规记录"""
-        return len(self.violations) > 0
-
-
 class ViolationRecord(Base):
     """违规记录模型"""
     __tablename__ = "violation_records"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String(36), ForeignKey("scan_tasks.id"), nullable=False, index=True)
-    domain_id = Column(String(36), ForeignKey("third_party_domains.id"), nullable=False)
+    domain_record_id = Column(String(36), ForeignKey("domain_records.id"), nullable=True)  # 新的统一域名表
     
     # 违规信息
     violation_type = Column(String(100), nullable=False, index=True)
@@ -305,7 +223,7 @@ class ViolationRecord(Base):
     
     # 关联关系
     task = relationship("ScanTask", back_populates="violations")
-    domain = relationship("ThirdPartyDomain", back_populates="violations")
+    domain_record = relationship("DomainRecord", back_populates="violations")  # 新的统一域名表
     
     def __repr__(self):
         return f"<ViolationRecord(id={self.id}, type={self.violation_type}, risk={self.risk_level})>"

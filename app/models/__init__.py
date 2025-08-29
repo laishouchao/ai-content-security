@@ -5,7 +5,8 @@
 """
 
 from .user import User, UserAIConfig
-from .task import ScanTask, TaskLog, SubdomainRecord, ThirdPartyDomain, ViolationRecord
+from .task import ScanTask, TaskLog, ViolationRecord
+from .domain import DomainRecord
 from .system import SystemConfig, UserPermission, LoginAttempt
 
 __all__ = [
@@ -13,9 +14,8 @@ __all__ = [
     "UserAIConfig", 
     "ScanTask",
     "TaskLog",
-    "SubdomainRecord",
-    "ThirdPartyDomain",
     "ViolationRecord",
+    "DomainRecord",
     "SystemConfig",
     "UserPermission",
     "LoginAttempt"

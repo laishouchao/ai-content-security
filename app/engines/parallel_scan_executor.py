@@ -136,7 +136,7 @@ class ParallelScanExecutor:
         self.results = {
             'subdomains': [],
             'crawl_results': [],
-            'third_party_domains': [],
+            'domain_records': [],
             'content_results': [],
             'violation_records': [],
             'statistics': {}
@@ -388,11 +388,11 @@ class ParallelScanExecutor:
                     self.logger.info(f"🔍 开始分析域名: {crawl_result.domain}")
                     
                     # 第三方域名识别
-                    third_party_domains = await self.identifier_engine.identify_third_party_domains(
+                    domain_records = await self.identifier_engine.identify_domain_records(
                         crawl_result.domain, [crawl_result], config
                     )
-                    self.results['third_party_domains'].extend(third_party_domains)
-                    self.logger.info(f"识别到 {len(third_party_domains)} 个第三方域名")
+                    self.results['domain_records'].extend(domain_records)
+                    self.logger.info(f"识别到 {len(domain_records)} 个第三方域名")
                     
                     # 内容抓取
                     content_results = await self.capture_engine.capture_domain_content(
@@ -443,7 +443,7 @@ class ParallelScanExecutor:
                         'domain_analyzed',
                         {
                             'domain': crawl_result.domain,
-                            'third_party_count': len(third_party_domains),
+                            'third_party_count': len(domain_records),
                             'content_count': len(content_results),
                             'total_analyzed': analysis_count
                         }
@@ -571,18 +571,10 @@ class ParallelScanExecutor:
             self.logger.info(f"⚠️ 错误状态码: {content_result.status_code}")
             return False, "error_status_code"
         
-        # 随机采样策略（为了调试，提高采样率）
-        import random
-        sample_rate = 0.8  # 提高到80%采样率以便调试
-        random_value = random.random()
-        self.logger.debug(f"🎲 随机采样: {random_value:.3f} vs {sample_rate} (threshold)")
-        
-        if random_value < sample_rate:
-            self.logger.info(f"✅ 随机采样命中: {content_result.url}")
-            return True, "random_sample"
-        else:
-            self.logger.info(f"⏭️ 随机采样跳过: {content_result.url}")
-            return False, "random_skip"
+        # 移除随机采样逻辑，确保所有内容都进行AI分析
+        # 为了全面扫描，所有内容都应该被分析
+        self.logger.info(f"✅ 强制分析所有内容: {content_result.url}")
+        return True, "force_analysis"
     
     async def _perform_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
         """执行AI分析"""
@@ -594,14 +586,30 @@ class ParallelScanExecutor:
             
             from app.models.user import UserAIConfig
             from app.core.database import AsyncSessionLocal
+            from sqlalchemy import select
+            from app.core.security import data_encryption
             
             try:
                 async with AsyncSessionLocal() as db:
-                    ai_config = await db.get(UserAIConfig, self.user_id)
+                    # 使用正确的查询方式：根据user_id查询，而不是使用主键
+                    stmt = select(UserAIConfig).where(UserAIConfig.user_id == self.user_id)
+                    result = await db.execute(stmt)
+                    ai_config = result.scalar_one_or_none()
                     
                     if not ai_config:
                         self.logger.error(f"❌ 用户AI配置不存在: user_id={self.user_id}")
                         return []
+                    
+                    # 解密API密钥
+                    if ai_config.openai_api_key is not None:
+                        try:
+                            decrypted_api_key = data_encryption.decrypt_data(str(ai_config.openai_api_key))
+                            # 使用setattr来避免SQLAlchemy Column类型检查问题
+                            setattr(ai_config, 'openai_api_key', decrypted_api_key)
+                        except Exception as e:
+                            self.logger.warning(f"解密API密钥失败: {e}")
+                            # 使用setattr来避免SQLAlchemy Column类型检查问题
+                            setattr(ai_config, 'openai_api_key', None)
                     
                     self.logger.debug(f"🔑 获取到AI配置: model={ai_config.model_name}, "
                                      f"has_api_key={bool(ai_config.openai_api_key)}, "
@@ -623,7 +631,7 @@ class ParallelScanExecutor:
             try:
                 # 由于AIAnalysisEngine.analyze_domains需要ThirdPartyDomain对象列表
                 # 我们需要创建一个临时的域名对象来进行分析
-                from app.models.task import ThirdPartyDomain
+                from app.models.domain import DomainRecord
                 from urllib.parse import urlparse
                 
                 # 从content_result.url解析域名
@@ -633,7 +641,7 @@ class ParallelScanExecutor:
                 self.logger.debug(f"🌍 解析域名: {domain_name} from {content_result.url}")
                 
                 # 创建临时的ThirdPartyDomain对象
-                temp_domain = ThirdPartyDomain(
+                temp_domain = DomainRecord(
                     task_id=self.task_id,
                     domain=domain_name,
                     found_on_url=content_result.url,
@@ -675,7 +683,7 @@ class ParallelScanExecutor:
             'total_subdomains': len(self.results['subdomains']),
             'accessible_subdomains': len([s for s in self.results['subdomains'] if s.is_accessible]),
             'total_pages_crawled': len(self.results['crawl_results']),
-            'total_third_party_domains': len(self.results['third_party_domains']),
+            'total_domain_records': len(self.results['domain_records']),
             'total_violations': len(self.results['violation_records']),
             'execution_duration': int(time.time() - self.start_time) if self.start_time else 0,
             'pipeline_efficiency': {

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.logging import logger
-from app.models.task import ScanTask, TaskLog, SubdomainRecord, ThirdPartyDomain, ViolationRecord
+from app.models.domain import DomainRecord
 
 
 class CacheManager:
@@ -280,8 +280,8 @@ class CacheManager:
         """清理数据库中的孤立记录"""
         cleanup_stats = {
             'task_logs': 0,
-            'subdomain_records': 0,
-            'third_party_domains': 0,
+            'domain_records': 0,
+            'domain_records': 0,
             'violation_records': 0
         }
         
@@ -307,24 +307,24 @@ class CacheManager:
                     cleanup_stats['task_logs'] = result.rowcount
                 
                 # 清理孤立的子域名记录
-                stmt = select(SubdomainRecord.id).where(~SubdomainRecord.task_id.in_(valid_task_ids))
+                stmt = select(DomainRecord.id).where(~DomainRecord.task_id.in_(valid_task_ids))
                 result = await db.execute(stmt)
                 orphaned_subdomain_ids = [row[0] for row in result.fetchall()]
                 
                 if orphaned_subdomain_ids:
-                    stmt = delete(SubdomainRecord).where(SubdomainRecord.id.in_(orphaned_subdomain_ids))
+                    stmt = delete(DomainRecord).where(DomainRecord.id.in_(orphaned_subdomain_ids))
                     result = await db.execute(stmt)
-                    cleanup_stats['subdomain_records'] = result.rowcount
+                    cleanup_stats['domain_records'] = result.rowcount
                 
                 # 清理孤立的第三方域名记录
-                stmt = select(ThirdPartyDomain.id).where(~ThirdPartyDomain.task_id.in_(valid_task_ids))
+                stmt = select(DomainRecord.id).where(~DomainRecord.task_id.in_(valid_task_ids))
                 result = await db.execute(stmt)
                 orphaned_domain_ids = [row[0] for row in result.fetchall()]
                 
                 if orphaned_domain_ids:
-                    stmt = delete(ThirdPartyDomain).where(ThirdPartyDomain.id.in_(orphaned_domain_ids))
+                    stmt = delete(DomainRecord).where(DomainRecord.id.in_(orphaned_domain_ids))
                     result = await db.execute(stmt)
-                    cleanup_stats['third_party_domains'] = result.rowcount
+                    cleanup_stats['domain_records'] = result.rowcount
                 
                 # 清理孤立的违规记录
                 stmt = select(ViolationRecord.id).where(~ViolationRecord.task_id.in_(valid_task_ids))

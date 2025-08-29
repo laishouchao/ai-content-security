@@ -181,12 +181,12 @@ class EnhancedAIAnalysisEngine:
         violations = []
         
         try:
-            # 由于 AIAnalysisEngine 主要针对 ThirdPartyDomain 设计，
+            # 由于 AIAnalysisEngine 主要针对 DomainRecord 设计，
             # 我们需要创建一个模拟的 domain 对象或者直接使用其内部方法
-            from app.models.task import ThirdPartyDomain
+            from app.models.domain import DomainRecord
             
-            # 创建一个模拟的 ThirdPartyDomain 对象
-            mock_domain = ThirdPartyDomain()
+            # 创建一个模拟的 DomainRecord 对象
+            mock_domain = DomainRecord()
             setattr(mock_domain, 'domain', content_result.domain)
             setattr(mock_domain, 'screenshot_path', content_result.screenshot_path)
             setattr(mock_domain, 'page_title', getattr(content_result, 'title', ''))
@@ -280,12 +280,41 @@ class EnhancedAIAnalysisEngine:
         """初始化AI引擎"""
         try:
             from app.core.database import AsyncSessionLocal
+            from app.models.user import UserAIConfig
+            from sqlalchemy import select
+            from app.core.security import data_encryption
             
             async with AsyncSessionLocal() as db:
-                ai_config = await db.get(UserAIConfig, self.user_id)
+                stmt = select(UserAIConfig).where(UserAIConfig.user_id == self.user_id)
+                result = await db.execute(stmt)
+                ai_config = result.scalar_one_or_none()
+                
                 if ai_config:
-                    self.ai_engine = AIAnalysisEngine(self.task_id, ai_config)
-                    self.logger.info("AI引擎初始化成功")
+                    # 解密API密钥
+                    decrypted_api_key = None
+                    if ai_config.openai_api_key is not None and str(ai_config.openai_api_key).strip() != '':
+                        try:
+                            decrypted_api_key = data_encryption.decrypt_data(str(ai_config.openai_api_key))
+                        except Exception as e:
+                            self.logger.warning(f"解密API密钥失败: {e}")
+                            decrypted_api_key = None
+                    
+                    # 为了避免SQLAlchemy Column对象的类型检查问题，我们使用临时属性的方法
+                    if decrypted_api_key:
+                        # 临时替换加密的API密钥
+                        original_api_key = ai_config.openai_api_key
+                        
+                        # 使用setattr来避免类型检查问题
+                        setattr(ai_config, 'openai_api_key', decrypted_api_key)
+                        
+                        try:
+                            self.ai_engine = AIAnalysisEngine(self.task_id, ai_config)
+                            self.logger.info("AI引擎初始化成功")
+                        finally:
+                            # 恢复原始的加密密钥
+                            setattr(ai_config, 'openai_api_key', original_api_key)
+                    else:
+                        self.logger.warning("无有效的API密钥，无法初始化AI引擎")
                 else:
                     self.logger.warning("未找到用户AI配置")
                     

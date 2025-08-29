@@ -14,7 +14,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from app.core.database import AsyncSessionLocal
-from app.models.task import ScanTask, ThirdPartyDomain, ViolationRecord
+from app.models.domain import DomainRecord
 from app.models.user import User, UserAIConfig
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -89,8 +89,8 @@ async def diagnose_ai_analysis():
         
         # 4. 检查第三方域名记录
         print("4️⃣ 检查第三方域名记录...")
-        domains_stmt = select(ThirdPartyDomain).where(
-            ThirdPartyDomain.task_id == task_id
+        domains_stmt = select(DomainRecord).where(
+            DomainRecord.task_id == task_id
         ).limit(10)
         domains_result = await db.execute(domains_stmt)
         domains = domains_result.scalars().all()

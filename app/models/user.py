@@ -109,7 +109,7 @@ class UserAIConfig(Base):
     @property
     def has_valid_config(self) -> bool:
         """检查是否有有效的AI配置"""
-        return bool(self.openai_api_key and self.model_name)
+        return bool(getattr(self, 'openai_api_key', None) and getattr(self, 'model_name', None))
     
     @property
     def max_tokens_int(self) -> int:

@@ -12,7 +12,8 @@ from app.core.logging import TaskLogger
 from app.core.config import settings
 from app.core.security import data_encryption
 from app.models.user import UserAIConfig
-from app.models.task import ThirdPartyDomain, ViolationRecord, RiskLevel
+from app.models.task import ViolationRecord, RiskLevel
+from app.models.domain import DomainRecord
 from app.core.prometheus import record_ai_analysis, record_violation_detected, record_error
 from app.engines.ai_analysis_output_manager import AIAnalysisOutputManager
 
@@ -236,7 +237,7 @@ class AIAnalysisEngine:
         if openai_base_url_value == "":
             raise ValueError("缺少OpenAI基础URL")
     
-    async def analyze_domains(self, domains: List[ThirdPartyDomain]) -> List[ViolationRecord]:
+    async def analyze_domains(self, domains: List[DomainRecord]) -> List[ViolationRecord]:
         """批量分析第三方域名"""
         self.logger.info(f"开始AI分析 {len(domains)} 个第三方域名")
         
@@ -317,7 +318,7 @@ class AIAnalysisEngine:
         self.logger.info(f"AI分析完成，共分析 {analyzed_count} 个域名，发现 {len(violations)} 个违规")
         return violations
     
-    async def _save_analysis_result_to_cache(self, domain: ThirdPartyDomain, result: AIAnalysisResult):
+    async def _save_analysis_result_to_cache(self, domain: DomainRecord, result: AIAnalysisResult):
         """保存AI分析结果到缓存"""
         try:
             from app.core.database import AsyncSessionLocal
@@ -327,10 +328,10 @@ class AIAnalysisEngine:
             
             async with AsyncSessionLocal() as db:
                 # 更新任务中的域名记录
-                update_stmt = update(ThirdPartyDomain).where(
-                    ThirdPartyDomain.id == domain.id
+                update_stmt = update(DomainRecord).where(
+                    DomainRecord.id == domain.id
                 ).values(
-                    cached_analysis_result={
+                    ai_analysis_result={
                         "has_violation": result.has_violation,
                         "violation_types": result.violation_types,
                         "confidence_score": result.confidence_score,
@@ -372,7 +373,7 @@ class AIAnalysisEngine:
         except Exception as e:
             self.logger.warning(f"保存分析结果到缓存失败: {e}")
     
-    async def _analyze_single_domain(self, domain: ThirdPartyDomain) -> AIAnalysisResult:
+    async def _analyze_single_domain(self, domain: DomainRecord) -> AIAnalysisResult:
         """分析单个域名"""
         result = AIAnalysisResult()
         
@@ -450,7 +451,7 @@ class AIAnalysisEngine:
         
         return result
     
-    async def _build_enhanced_analysis_prompt(self, domain: ThirdPartyDomain, input_data: Dict[str, Any]) -> str:
+    async def _build_enhanced_analysis_prompt(self, domain: DomainRecord, input_data: Dict[str, Any]) -> str:
         """构建增强的AI分析提示词（结合截图和源码）"""
         
         page_title = input_data.get('page_title', '')

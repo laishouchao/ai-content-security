@@ -119,6 +119,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    """获取异步数据库会话（FastAPI依赖注入别名）"""
+    async with get_db_session() as session:
+        yield session
+
+
 async def init_db():
     """初始化数据库"""
     try:

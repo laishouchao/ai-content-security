@@ -250,9 +250,9 @@ const taskForm = reactive({
   timeout: 30,
   // 性能优化配置
   useParallelExecutor: true,      // 默认启用并行执行器
-  smartPrefilterEnabled: true,    // 默认启用智能预筛选
+  smartPrefilterEnabled: false,   // 禁用智能预筛选以确保全部分析
   dnsConcurrency: 100,            // DNS并发数
-  aiSkipThreshold: 0.3,           // AI跳过阈值
+  aiSkipThreshold: 0.0,           // 设置为0确保不跳过任何AI分析
   multiViewportCapture: false,    // 多视角截图
   enableAggressiveCaching: false  // 激进缓存
 })
@@ -283,9 +283,9 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 1
       taskForm.crawlDepth = 1
       taskForm.maxPages = 50
-      // 快速模式优化配置
+      // 快速模式优化配置（确保全部分析）
       taskForm.dnsConcurrency = 50
-      taskForm.aiSkipThreshold = 0.2
+      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = false
       break
     case 'standard':
@@ -296,9 +296,9 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 100
       taskForm.crawlDepth = 3
       taskForm.maxPages = 1000
-      // 标准模式优化配置
+      // 标准模式优化配置（确保全部分析）
       taskForm.dnsConcurrency = 100
-      taskForm.aiSkipThreshold = 0.3
+      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = false
       break
     case 'deep':
@@ -309,9 +309,9 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 500
       taskForm.crawlDepth = 5
       taskForm.maxPages = 5000
-      // 深度模式优化配置
+      // 深度模式优化配置（确保全部分析）
       taskForm.dnsConcurrency = 150
-      taskForm.aiSkipThreshold = 0.4
+      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = true
       break
   }

@@ -8,54 +8,54 @@
       <h2>任务详情 #{{ taskId }}</h2>
     </div>
 
-    <el-row :gutter="20">
-      <!-- 任务基本信息 -->
-      <el-col :span="24">
-        <el-card v-loading="loading">
-          <template #header>
-            <div class="card-header">
-              <span>基本信息</span>
-              <div class="task-actions">
-                <el-tag :type="getStatusType(task.status)">
-                  {{ getStatusText(task.status) }}
-                </el-tag>
-                <!-- 任务操作按钮 -->
-                <div class="action-buttons">
-                  <el-button 
-                    v-if="canCancelTask(task.status)" 
-                    type="warning" 
-                    size="small" 
-                    :loading="cancelling"
-                    @click="cancelTask"
-                  >
-                    <el-icon><Close /></el-icon>
-                    取消任务
-                  </el-button>
-                  <el-button 
-                    v-if="canRetryTask(task.status)" 
-                    type="primary" 
-                    size="small" 
-                    :loading="retrying"
-                    @click="retryTask"
-                  >
-                    <el-icon><Refresh /></el-icon>
-                    重试任务
-                  </el-button>
-                  <el-button 
-                    v-if="canDeleteTask(task.status)" 
-                    type="danger" 
-                    size="small" 
-                    :loading="deleting"
-                    @click="deleteTask"
-                  >
-                    <el-icon><Delete /></el-icon>
-                    删除任务
-                  </el-button>
-                </div>
-              </div>
+    <!-- 任务基本信息卡片 -->
+    <el-card v-loading="loading" class="task-info-card">
+      <template #header>
+        <div class="card-header">
+          <span>基本信息</span>
+          <div class="task-actions">
+            <el-tag :type="getStatusType(task.status)" size="large">
+              {{ getStatusText(task.status) }}
+            </el-tag>
+            <!-- 任务操作按钮 -->
+            <div class="action-buttons">
+              <el-button 
+                v-if="canCancelTask(task.status)" 
+                type="warning" 
+                size="small" 
+                :loading="cancelling"
+                @click="cancelTask"
+              >
+                <el-icon><Close /></el-icon>
+                取消任务
+              </el-button>
+              <el-button 
+                v-if="canRetryTask(task.status)" 
+                type="primary" 
+                size="small" 
+                :loading="retrying"
+                @click="retryTask"
+              >
+                <el-icon><Refresh /></el-icon>
+                重试任务
+              </el-button>
+              <el-button 
+                v-if="canDeleteTask(task.status)" 
+                type="danger" 
+                size="small" 
+                :loading="deleting"
+                @click="deleteTask"
+              >
+                <el-icon><Delete /></el-icon>
+                删除任务
+              </el-button>
             </div>
-          </template>
-          
+          </div>
+        </div>
+      </template>
+      
+      <el-row :gutter="20">
+        <el-col :span="18">
           <el-descriptions :column="3" border>
             <el-descriptions-item label="目标域名">
               <span class="domain-name">{{ task.target_domain }}</span>
@@ -66,7 +66,7 @@
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="执行进度">
-              <el-progress :percentage="task.progress" />
+              <el-progress :percentage="task.progress || 0" />
             </el-descriptions-item>
             <el-descriptions-item label="创建时间">
               {{ task.created_at ? formatTime(task.created_at) : '-' }}
@@ -77,144 +77,244 @@
             <el-descriptions-item label="完成时间">
               {{ task.completed_at ? formatTime(task.completed_at) : '-' }}
             </el-descriptions-item>
-            <el-descriptions-item label="发现子域名">
-              <el-tag type="info">{{ (task.total_subdomains || 0) }}个</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="扫描页面">
-              <el-tag type="info">{{ (task.total_pages_crawled || 0) }}个</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="检测违规">
-              <el-tag :type="(task.total_violations || 0) > 0 ? 'danger' : 'success'">
-                {{ (task.total_violations || 0) }}个
-              </el-tag>
-            </el-descriptions-item>
           </el-descriptions>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="20" style="margin-top: 20px;">
-      <!-- 子域名列表 -->
-      <el-col :span="12">
-        <el-card v-loading="subdomainsLoading">
-          <template #header>
-            <span>发现的子域名 ({{ subdomains.length || task.total_subdomains || 0 }})</span>
-          </template>
-          <div class="subdomain-list">
-            <div 
-              v-for="subdomain in subdomains" 
-              :key="subdomain.id"
-              class="subdomain-item"
-            >
-              <div class="subdomain-info">
-                <span class="subdomain-name">{{ subdomain.subdomain }}</span>
-                <el-tag :type="subdomain.is_accessible ? 'success' : 'danger'" size="small">
-                  {{ subdomain.is_accessible ? '可访问' : '不可访问' }}
-                </el-tag>
-              </div>
-              <div class="subdomain-meta">
-                <span class="ip">{{ subdomain.ip_address || '-' }}</span>
-                <span class="method">{{ subdomain.discovery_method }}</span>
-              </div>
+        </el-col>
+        <el-col :span="6">
+          <!-- 实时统计 -->
+          <div class="stats-summary">
+            <div class="stat-item">
+              <div class="stat-value">{{ domainStats.total_domains || 0 }}</div>
+              <div class="stat-label">发现域名总数</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ domainStats.accessible_count || 0 }}</div>
+              <div class="stat-label">可访问域名</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ domainStats.violation_count || 0 }}</div>
+              <div class="stat-label">违规域名</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ task.total_pages_crawled || 0 }}</div>
+              <div class="stat-label">爬取页面</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
+        </el-col>
+      </el-row>
+    </el-card>
 
-      <!-- 第三方域名列表 -->
-      <el-col :span="12">
-        <el-card v-loading="domainsLoading">
-          <template #header>
-            <span>第三方域名 ({{ thirdPartyDomains.length || task.total_third_party_domains || 0 }})</span>
-          </template>
-          <div class="domain-list">
-            <div 
-              v-for="domain in thirdPartyDomains" 
-              :key="domain.id"
-              class="domain-item"
-            >
-              <div class="domain-header">
-                <span class="domain-name">{{ domain.domain }}</span>
-                <div class="domain-tags">
-                  <!-- 违规标签 -->
-                  <el-tag 
-                    v-if="domain.has_violations" 
-                    :type="getRiskType(domain.risk_level)" 
-                    size="small"
-                  >
-                    {{ getRiskText(domain.risk_level) }}风险
+    <!-- 主要内容选项卡 -->
+    <el-card class="content-tabs-card">
+      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        
+        <!-- 需要扫描的域名选项卡 -->
+        <el-tab-pane label="需要扫描的域名" name="scan-domains">
+          <div class="tab-content">
+            <div class="filter-section">
+              <el-row :gutter="16" align="middle">
+                <el-col :span="6">
+                  <el-select v-model="scanDomainFilters.status" placeholder="状态筛选" clearable>
+                    <el-option label="已发现" value="discovered" />
+                    <el-option label="可访问" value="accessible" />
+                    <el-option label="不可访问" value="inaccessible" />
+                  </el-select>
+                </el-col>
+                <el-col :span="6">
+                  <el-select v-model="scanDomainFilters.category" placeholder="类型筛选" clearable>
+                    <el-option label="目标主域名" value="target_main" />
+                    <el-option label="目标子域名" value="target_subdomain" />
+                  </el-select>
+                </el-col>
+                <el-col :span="8">
+                  <el-input
+                    v-model="scanDomainFilters.search"
+                    placeholder="搜索域名..."
+                    clearable
+                  />
+                </el-col>
+                <el-col :span="4">
+                  <el-button type="primary" @click="refreshScanDomains" :loading="scanDomainsLoading">
+                    <el-icon><Refresh /></el-icon>
+                    刷新
+                  </el-button>
+                </el-col>
+              </el-row>
+            </div>
+
+            <div class="stats-row">
+              <el-tag type="info">待扫描: {{ filteredScanDomains.length }}</el-tag>
+              <el-tag type="success">可访问: {{ scanDomainStats.accessible }}</el-tag>
+              <el-tag type="warning">不可访问: {{ scanDomainStats.inaccessible }}</el-tag>
+            </div>
+
+            <el-table :data="paginatedScanDomains" v-loading="scanDomainsLoading" stripe>
+              <el-table-column prop="domain" label="域名" sortable />
+              <el-table-column prop="status" label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="getDomainStatusType(row.status)" size="small">
+                    {{ getDomainStatusText(row.status) }}
                   </el-tag>
-                  <!-- 未违规标签 -->
-                  <el-tag v-else type="success" size="small">合规</el-tag>
-                  <!-- 域名类型标签 -->
-                  <el-tag type="info" size="small">{{ getDomainTypeText(domain.domain_type) }}</el-tag>
-                </div>
-              </div>
-              <div class="domain-content">
-                <p class="domain-desc">{{ domain.page_title || '无标题' }}</p>
-                <div class="domain-meta">
-                  <span class="found-url">发现于: {{ domain.found_on_url }}</span>
-                  <span class="analyzed-status">
-                    {{ domain.is_analyzed ? '已分析' : '未分析' }}
-                  </span>
-                </div>
-                <!-- 违规详情 -->
-                <div v-if="domain.has_violations && domain.violations && domain.violations.length > 0" class="violation-details">
-                  <div 
-                    v-for="violation in domain.violations" 
-                    :key="violation.id"
-                    class="violation-item"
-                  >
-                    <div class="violation-header">
-                      <span class="violation-title">{{ violation.title }}</span>
-                      <el-tag :type="getRiskType(violation.risk_level)" size="small">
-                        {{ getRiskText(violation.risk_level) }}风险
-                      </el-tag>
-                    </div>
-                    <p class="violation-desc">{{ violation.description }}</p>
-                    <div class="violation-meta">
-                      <span class="confidence">置信度: {{ Math.round(violation.confidence_score * 100) }}%</span>
-                      <span class="violation-type">{{ getViolationTypeText(violation.violation_type) }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="is_accessible" label="可访问性" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_accessible ? 'success' : 'danger'" size="small">
+                    {{ row.is_accessible ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="discovery_method" label="发现方式" width="120" />
+              <el-table-column prop="ip_address" label="IP地址" width="120" />
+              <el-table-column prop="first_discovered_at" label="发现时间" width="150">
+                <template #default="{ row }">
+                  {{ row.first_discovered_at ? formatTime(row.first_discovered_at) : '-' }}
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </el-tab-pane>
 
-    <!-- 执行日志 -->
-    <el-row style="margin-top: 20px;">
-      <el-col :span="24">
-        <el-card v-loading="logsLoading">
-          <template #header>
-            <span>执行日志</span>
-          </template>
-          <div class="log-container">
-            <div 
-              v-for="log in logs" 
-              :key="log.id"
-              class="log-item"
-              :class="log.level.toLowerCase()"
-            >
-              <span class="log-time">{{ formatTime(log.created_at) }}</span>
-              <span class="log-level">{{ log.level }}</span>
-              <span class="log-message">{{ log.message }}</span>
+        <!-- 检测到的所有域名选项卡 -->
+        <el-tab-pane label="检测到的所有域名" name="all-domains">
+          <div class="tab-content">
+            <div class="filter-section">
+              <el-row :gutter="16" align="middle">
+                <el-col :span="5">
+                  <el-select v-model="allDomainFilters.category" placeholder="域名类型" clearable>
+                    <el-option label="目标主域名" value="target_main" />
+                    <el-option label="目标子域名" value="target_subdomain" />
+                    <el-option label="第三方域名" value="third_party" />
+                  </el-select>
+                </el-col>
+                <el-col :span="5">
+                  <el-select v-model="allDomainFilters.risk_level" placeholder="风险等级" clearable>
+                    <el-option label="高" value="high" />
+                    <el-option label="中" value="medium" />
+                    <el-option label="低" value="low" />
+                  </el-select>
+                </el-col>
+                <el-col :span="6">
+                  <el-input
+                    v-model="allDomainFilters.search"
+                    placeholder="搜索域名..."
+                    clearable
+                  />
+                </el-col>
+                <el-col :span="4">
+                  <el-button type="primary" @click="refreshAllDomains" :loading="allDomainsLoading">
+                    <el-icon><Refresh /></el-icon>
+                    刷新
+                  </el-button>
+                </el-col>
+              </el-row>
+            </div>
+
+            <div class="stats-row">
+              <el-tag type="info">总计: {{ filteredAllDomains.length }}</el-tag>
+              <el-tag type="warning">目标相关: {{ allDomainStats.target_related }}</el-tag>
+              <el-tag type="primary">第三方: {{ allDomainStats.third_party }}</el-tag>
+              <el-tag type="danger">有违规: {{ allDomainStats.violations }}</el-tag>
+            </div>
+
+            <el-table :data="paginatedAllDomains" v-loading="allDomainsLoading" stripe>
+              <el-table-column prop="domain" label="域名" sortable />
+              <el-table-column prop="category" label="类型" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="getCategoryType(row.category)" size="small">
+                    {{ getCategoryText(row.category) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="risk_level" label="风险" width="80">
+                <template #default="{ row }">
+                  <el-tag :type="getRiskType(row.risk_level)" size="small">
+                    {{ getRiskText(row.risk_level) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="违规" width="80">
+                <template #default="{ row }">
+                  <el-tag :type="row.has_violations ? 'danger' : 'success'" size="small">
+                    {{ row.has_violations ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="page_title" label="页面标题" show-overflow-tooltip />
+              <el-table-column prop="first_discovered_at" label="发现时间" width="150">
+                <template #default="{ row }">
+                  {{ row.first_discovered_at ? formatTime(row.first_discovered_at) : '-' }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 运行日志选项卡 -->
+        <el-tab-pane label="运行日志" name="logs">
+          <div class="tab-content">
+            <div class="filter-section">
+              <el-row :gutter="16" align="middle">
+                <el-col :span="4">
+                  <el-select v-model="logFilters.level" placeholder="日志级别" clearable>
+                    <el-option label="INFO" value="info" />
+                    <el-option label="WARN" value="warn" />
+                    <el-option label="ERROR" value="error" />
+                  </el-select>
+                </el-col>
+                <el-col :span="8">
+                  <el-input
+                    v-model="logFilters.search"
+                    placeholder="搜索日志内容..."
+                    clearable
+                  />
+                </el-col>
+                <el-col :span="4">
+                  <el-button type="primary" @click="refreshLogs" :loading="logsLoading">
+                    <el-icon><Refresh /></el-icon>
+                    刷新
+                  </el-button>
+                </el-col>
+                <el-col :span="4">
+                  <el-switch
+                    v-model="autoRefreshLogs"
+                    active-text="自动刷新"
+                    @change="toggleAutoRefresh"
+                  />
+                </el-col>
+              </el-row>
+            </div>
+
+            <div class="stats-row">
+              <el-tag type="info">总计: {{ filteredLogs.length }}</el-tag>
+              <el-tag type="success">INFO: {{ logStats.info }}</el-tag>
+              <el-tag type="warning">WARN: {{ logStats.warn }}</el-tag>
+              <el-tag type="danger">ERROR: {{ logStats.error }}</el-tag>
+            </div>
+
+            <div class="log-container">
+              <div 
+                v-for="log in paginatedLogs" 
+                :key="log.id"
+                class="log-item"
+                :class="log.level.toLowerCase()"
+              >
+                <span class="log-time">{{ formatTime(log.created_at) }}</span>
+                <span class="log-level">{{ log.level }}</span>
+                <span class="log-message">{{ log.message }}</span>
+              </div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Close, Refresh, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, Close, Refresh, Delete, Search } from '@element-plus/icons-vue'
 import { taskAPI, type Task } from '@/api/task'
 import type { SubdomainRecord, ViolationRecord, TaskLog, ThirdPartyDomain } from '@/types/api'
 
@@ -222,21 +322,161 @@ const route = useRoute()
 const router = useRouter()
 const taskId = route.params.id
 
-// 响应式状态
+// 基本状态
 const loading = ref(false)
-const subdomainsLoading = ref(false)
-const domainsLoading = ref(false)
-const logsLoading = ref(false)
 const cancelling = ref(false)
 const retrying = ref(false)
 const deleting = ref(false)
-
 const task = ref<Task>({} as Task)
-const subdomains = ref<SubdomainRecord[]>([])
-const logs = ref<TaskLog[]>([])
-const thirdPartyDomains = ref<ThirdPartyDomain[]>([])
 
-// 方法
+// 选项卡状态
+const activeTab = ref('scan-domains')
+
+// 域名数据和加载状态
+const scanDomainsLoading = ref(false)
+const allDomainsLoading = ref(false)
+const logsLoading = ref(false)
+const scanDomains = ref<any[]>([])
+const allDomains = ref<any[]>([])
+const logs = ref<TaskLog[]>([])
+
+// 过滤器
+const scanDomainFilters = ref({
+  status: '',
+  category: '',
+  search: ''
+})
+
+const allDomainFilters = ref({
+  category: '',
+  risk_level: '',
+  has_violations: null as boolean | null,
+  search: ''
+})
+
+const logFilters = ref({
+  level: '',
+  search: ''
+})
+
+// 分页状态
+const scanDomainPagination = ref({
+  page: 1,
+  size: 20
+})
+
+const allDomainPagination = ref({
+  page: 1,
+  size: 20
+})
+
+const logPagination = ref({
+  page: 1,
+  size: 50
+})
+
+// 日志自动刷新
+const autoRefreshLogs = ref(false)
+let autoRefreshTimer: number | null = null
+
+// 统计数据
+const domainStats = ref({
+  total_domains: 0,
+  accessible_count: 0,
+  violation_count: 0
+})
+
+// 过滤和分页的计算属性
+const filteredScanDomains = computed(() => {
+  let filtered = scanDomains.value
+  
+  if (scanDomainFilters.value.status) {
+    filtered = filtered.filter(d => d.status === scanDomainFilters.value.status)
+  }
+  if (scanDomainFilters.value.category) {
+    filtered = filtered.filter(d => d.category === scanDomainFilters.value.category)
+  }
+  if (scanDomainFilters.value.search) {
+    filtered = filtered.filter(d => d.domain.toLowerCase().includes(scanDomainFilters.value.search.toLowerCase()))
+  }
+  
+  return filtered
+})
+
+const paginatedScanDomains = computed(() => {
+  const start = (scanDomainPagination.value.page - 1) * scanDomainPagination.value.size
+  const end = start + scanDomainPagination.value.size
+  return filteredScanDomains.value.slice(start, end)
+})
+
+const filteredAllDomains = computed(() => {
+  let filtered = allDomains.value
+  
+  if (allDomainFilters.value.category) {
+    filtered = filtered.filter(d => d.category === allDomainFilters.value.category)
+  }
+  if (allDomainFilters.value.risk_level) {
+    filtered = filtered.filter(d => d.risk_level === allDomainFilters.value.risk_level)
+  }
+  if (allDomainFilters.value.has_violations !== null) {
+    filtered = filtered.filter(d => d.has_violations === allDomainFilters.value.has_violations)
+  }
+  if (allDomainFilters.value.search) {
+    filtered = filtered.filter(d => d.domain.toLowerCase().includes(allDomainFilters.value.search.toLowerCase()))
+  }
+  
+  return filtered
+})
+
+const paginatedAllDomains = computed(() => {
+  const start = (allDomainPagination.value.page - 1) * allDomainPagination.value.size
+  const end = start + allDomainPagination.value.size
+  return filteredAllDomains.value.slice(start, end)
+})
+
+const filteredLogs = computed(() => {
+  let filtered = logs.value
+  
+  if (logFilters.value.level) {
+    filtered = filtered.filter(l => l.level.toLowerCase() === logFilters.value.level)
+  }
+  if (logFilters.value.search) {
+    filtered = filtered.filter(l => l.message.toLowerCase().includes(logFilters.value.search.toLowerCase()))
+  }
+  
+  return filtered
+})
+
+const paginatedLogs = computed(() => {
+  const start = (logPagination.value.page - 1) * logPagination.value.size
+  const end = start + logPagination.value.size
+  return filteredLogs.value.slice(start, end)
+})
+
+// 统计计算属性
+const scanDomainStats = computed(() => {
+  return {
+    accessible: filteredScanDomains.value.filter(d => d.is_accessible).length,
+    inaccessible: filteredScanDomains.value.filter(d => !d.is_accessible).length,
+    analyzed: filteredScanDomains.value.filter(d => d.is_analyzed).length
+  }
+})
+
+const allDomainStats = computed(() => {
+  return {
+    target_related: filteredAllDomains.value.filter(d => d.category === 'target_main' || d.category === 'target_subdomain').length,
+    third_party: filteredAllDomains.value.filter(d => d.category === 'third_party').length,
+    violations: filteredAllDomains.value.filter(d => d.has_violations).length
+  }
+})
+
+const logStats = computed(() => {
+  return {
+    info: filteredLogs.value.filter(l => l.level.toLowerCase() === 'info').length,
+    warn: filteredLogs.value.filter(l => l.level.toLowerCase() === 'warn').length,
+    error: filteredLogs.value.filter(l => l.level.toLowerCase() === 'error').length
+  }
+})
 const getStatusType = (status: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
   const statusMap: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
     pending: 'info',
@@ -329,44 +569,213 @@ const fetchTaskDetail = async () => {
   }
 }
 
-// 获取子域名列表
-const fetchSubdomains = async () => {
+// 新的域名相关方法
+const getDomainStatusType = (status: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const statusMap: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    discovered: 'info',
+    accessible: 'success',
+    inaccessible: 'danger',
+    analyzing: 'warning',
+    analyzed: 'primary'
+  }
+  return statusMap[status] || 'info'
+}
+
+const getDomainStatusText = (status: string) => {
+  const statusMap: Record<string, string> = {
+    discovered: '已发现',
+    accessible: '可访问',
+    inaccessible: '不可访问',
+    analyzing: '分析中',
+    analyzed: '已分析'
+  }
+  return statusMap[status] || status
+}
+
+const getCategoryType = (category: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const categoryMap: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    target_main: 'danger',
+    target_subdomain: 'warning',
+    third_party: 'primary',
+    unknown: 'info'
+  }
+  return categoryMap[category] || 'info'
+}
+
+const getCategoryText = (category: string) => {
+  const categoryMap: Record<string, string> = {
+    target_main: '主域名',
+    target_subdomain: '子域名',
+    third_party: '第三方',
+    unknown: '未知'
+  }
+  return categoryMap[category] || category
+}
+
+const getDiscoveryMethodText = (method: string) => {
+  const methodMap: Record<string, string> = {
+    subdomain_enum: '子域名枚举',
+    dns_lookup: 'DNS查询',
+    certificate: '证书',
+    link_crawling: '链接爬取',
+    manual: '手动',
+    third_party_scan: '第三方扫描'
+  }
+  return methodMap[method] || method
+}
+
+// 新的数据加载方法
+const fetchScanDomains = async () => {
   try {
-    subdomainsLoading.value = true
-    const response = await taskAPI.getSubdomains(taskId as string)
-    if (response.data.success) {
-      subdomains.value = response.data.data?.items || []
+    scanDomainsLoading.value = true
+    const response = await fetch(`/api/v1/tasks/${taskId}/scan-domains?${new URLSearchParams({
+      skip: String((scanDomainPagination.value.page - 1) * scanDomainPagination.value.size),
+      limit: String(scanDomainPagination.value.size),
+      ...(scanDomainFilters.value.status && { status: scanDomainFilters.value.status }),
+      ...(scanDomainFilters.value.category && { category: scanDomainFilters.value.category }),
+      ...(scanDomainFilters.value.search && { search: scanDomainFilters.value.search })
+    })}`)
+    
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success) {
+        scanDomains.value = data.data.items || []
+      }
     }
   } catch (error) {
-    console.error('获取子域名列表失败:', error)
-    ElMessage.error('获取子域名列表失败')
+    console.error('获取扫描域名失败:', error)
+    ElMessage.error('获取扫描域名失败')
   } finally {
-    subdomainsLoading.value = false
+    scanDomainsLoading.value = false
   }
 }
 
-// 获取第三方域名列表
-const fetchThirdPartyDomains = async () => {
+const fetchAllDomains = async () => {
   try {
-    domainsLoading.value = true
-    const response = await taskAPI.getThirdPartyDomains(taskId as string)
-    if (response.data.success) {
-      // 获取第三方域名列表
-      const domains = response.data.data?.items || []
-      
-      // 为每个域名添加has_violations属性
-      const domainsWithViolations = domains.map(domain => ({
-        ...domain,
-        has_violations: domain.violations && domain.violations.length > 0
-      }))
-      
-      thirdPartyDomains.value = domainsWithViolations
+    allDomainsLoading.value = true
+    const response = await fetch(`/api/v1/tasks/${taskId}/all-domains?${new URLSearchParams({
+      skip: String((allDomainPagination.value.page - 1) * allDomainPagination.value.size),
+      limit: String(allDomainPagination.value.size),
+      ...(allDomainFilters.value.category && { category: allDomainFilters.value.category }),
+      ...(allDomainFilters.value.risk_level && { risk_level: allDomainFilters.value.risk_level }),
+      ...(allDomainFilters.value.search && { search: allDomainFilters.value.search })
+    })}`)
+    
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success) {
+        allDomains.value = data.data.items || []
+      }
     }
   } catch (error) {
-    console.error('获取第三方域名失败:', error)
-    ElMessage.error('获取第三方域名失败')
+    console.error('获取所有域名失败:', error)
+    ElMessage.error('获取所有域名失败')
   } finally {
-    domainsLoading.value = false
+    allDomainsLoading.value = false
+  }
+}
+
+// 获取统计数据
+const fetchDomainStats = async () => {
+  try {
+    const response = await fetch(`/api/v1/tasks/${taskId}/domain-stats`)
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success) {
+        domainStats.value = data.data
+      }
+    }
+  } catch (error) {
+    console.error('获取域名统计失败:', error)
+  }
+}
+
+// 刷新方法
+const refreshScanDomains = () => {
+  fetchScanDomains()
+}
+
+const refreshAllDomains = () => {
+  fetchAllDomains()
+}
+
+const refreshLogs = () => {
+  fetchLogs()
+}
+
+// 选项卡切换
+const handleTabChange = (tabName: string | number) => {
+  const name = String(tabName)
+  if (name === 'scan-domains' && scanDomains.value.length === 0) {
+    fetchScanDomains()
+  } else if (name === 'all-domains' && allDomains.value.length === 0) {
+    fetchAllDomains()
+  } else if (name === 'logs' && logs.value.length === 0) {
+    fetchLogs()
+  }
+}
+
+// 分页处理
+const handleScanDomainPageChange = (page: number) => {
+  scanDomainPagination.value.page = page
+}
+
+const handleScanDomainSizeChange = (size: number) => {
+  scanDomainPagination.value.size = size
+  scanDomainPagination.value.page = 1
+}
+
+const handleAllDomainPageChange = (page: number) => {
+  allDomainPagination.value.page = page
+}
+
+const handleAllDomainSizeChange = (size: number) => {
+  allDomainPagination.value.size = size
+  allDomainPagination.value.page = 1
+}
+
+// 排序处理
+const handleScanDomainSort = (sort: any) => {
+  // TODO: 实现排序逻辑
+}
+
+const handleAllDomainSort = (sort: any) => {
+  // TODO: 实现排序逻辑
+}
+
+// 操作方法
+const viewDomainDetail = (domain: any) => {
+  // TODO: 实现域名详情查看
+  ElMessage.info(`查看域名详情: ${domain.domain}`)
+}
+
+const viewViolations = (domain: any) => {
+  // TODO: 实现违规详情查看
+  ElMessage.info(`查看违规详情: ${domain.domain}`)
+}
+
+// 自动刷新日志
+const toggleAutoRefresh = (enabled: string | number | boolean) => {
+  const isEnabled = Boolean(enabled)
+  if (isEnabled) {
+    autoRefreshTimer = window.setInterval(() => {
+      if (activeTab.value === 'logs') {
+        fetchLogs()
+      }
+    }, 5000) // 每5秒刷新一次
+  } else {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer)
+      autoRefreshTimer = null
+    }
+  }
+}
+
+// 清空过滤器
+const clearLogFilters = () => {
+  logFilters.value = {
+    level: '',
+    search: ''
   }
 }
 
@@ -493,9 +902,8 @@ const deleteTask = async () => {
 onMounted(() => {
   if (taskId) {
     fetchTaskDetail()
-    fetchSubdomains()
-    fetchThirdPartyDomains()
-    fetchLogs()
+    fetchDomainStats() // 加载域名统计数据
+    fetchLogs() // 默认加载日志
   }
 })
 </script>
@@ -516,6 +924,14 @@ onMounted(() => {
   margin: 0;
   font-size: 24px;
   font-weight: 600;
+}
+
+.task-info-card {
+  margin-bottom: 20px;
+}
+
+.content-tabs-card {
+  min-height: 600px;
 }
 
 .card-header {
@@ -540,183 +956,178 @@ onMounted(() => {
   color: #409eff;
 }
 
-.subdomain-list {
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.subdomain-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.subdomain-item:last-child {
-  border-bottom: none;
-}
-
-.subdomain-info {
+/* 统计卡片样式 */
+.stats-summary {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  color: white;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
   margin-bottom: 4px;
 }
 
-.subdomain-name {
-  font-weight: 500;
-  color: #333;
+.stat-label {
+  font-size: 12px;
+  opacity: 0.9;
 }
 
-.subdomain-meta {
+/* 选项卡内容样式 */
+.tab-content {
+  padding: 20px 0;
+}
+
+.filter-section {
+  margin-bottom: 20px;
+  padding: 16px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.stats-row {
+  margin-bottom: 20px;
   display: flex;
   gap: 12px;
-  font-size: 12px;
-  color: #999;
+  flex-wrap: wrap;
 }
 
-.domain-list {
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.domain-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.domain-item:last-child {
-  border-bottom: none;
-}
-
-.domain-header {
+.pagination-container {
+  margin-top: 20px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+  justify-content: center;
 }
 
-.domain-name {
+/* 域名链接样式 */
+.domain-link {
+  color: #409eff;
   font-weight: 500;
-  color: #333;
+  cursor: pointer;
 }
 
-.domain-tags {
-  display: flex;
-  gap: 6px;
+.domain-link:hover {
+  text-decoration: underline;
 }
 
-.domain-content {
-  margin-left: 12px;
-}
-
-.domain-desc {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  color: #666;
-  line-height: 1.4;
-}
-
-.domain-meta {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: #999;
-  margin-bottom: 8px;
-}
-
-.found-url {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.analyzed-status {
-  min-width: 50px;
-}
-
-.violation-details {
-  margin-top: 12px;
-  padding: 10px;
-  background-color: #fff5f5;
-  border-radius: 4px;
-  border-left: 3px solid #f56c6c;
-}
-
-.violation-item {
-  padding: 8px 0;
-}
-
-.violation-item:not(:last-child) {
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.violation-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.violation-title {
-  font-weight: 500;
-  color: #333;
-}
-
-.violation-desc {
-  margin: 0 0 8px 0;
-  font-size: 13px;
-  color: #666;
-  line-height: 1.4;
-}
-
-.violation-meta {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: #999;
-}
-
+/* 日志容器样式 */
 .log-container {
-  max-height: 400px;
+  max-height: 500px;
   overflow-y: auto;
   background-color: #f8f9fa;
-  padding: 12px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
+  padding: 16px;
+  border-radius: 6px;
+  font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .log-item {
   display: flex;
   gap: 12px;
   margin-bottom: 4px;
-  padding: 2px 0;
+  padding: 4px 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.log-item:last-child {
+  border-bottom: none;
 }
 
 .log-time {
-  color: #999;
-  min-width: 120px;
+  color: #6c757d;
+  min-width: 140px;
+  font-size: 11px;
 }
 
 .log-level {
-  min-width: 50px;
+  min-width: 60px;
   font-weight: 600;
+  text-transform: uppercase;
 }
 
 .log-item.info .log-level {
-  color: #409eff;
+  color: #17a2b8;
 }
 
 .log-item.warn .log-level {
-  color: #e6a23c;
+  color: #ffc107;
 }
 
 .log-item.error .log-level {
-  color: #f56c6c;
+  color: #dc3545;
+}
+
+.log-item.debug .log-level {
+  color: #6c757d;
 }
 
 .log-message {
   flex: 1;
-  color: #333;
+  color: #212529;
+  word-break: break-word;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .stats-summary {
+    flex-direction: row;
+    justify-content: space-around;
+  }
+  
+  .filter-section .el-row {
+    flex-direction: column;
+  }
+  
+  .filter-section .el-col {
+    margin-bottom: 12px;
+  }
+}
+
+/* 表格样式优化 */
+:deep(.el-table) {
+  font-size: 13px;
+}
+
+:deep(.el-table .el-table__header th) {
+  background-color: #f8f9fa;
+  color: #495057;
+  font-weight: 600;
+}
+
+:deep(.el-table .el-table__row:hover > td) {
+  background-color: #f8f9fa;
+}
+
+/* 选项卡样式优化 */
+:deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+
+:deep(.el-tabs__nav-wrap) {
+  padding: 0 20px;
+  background-color: #fafafa;
+}
+
+:deep(.el-tabs__item) {
+  font-weight: 500;
+  color: #606266;
+}
+
+:deep(.el-tabs__item.is-active) {
+  color: #409eff;
+  font-weight: 600;
+}
+
+:deep(.el-tabs__content) {
+  padding: 0 20px 20px;
 }
 </style>

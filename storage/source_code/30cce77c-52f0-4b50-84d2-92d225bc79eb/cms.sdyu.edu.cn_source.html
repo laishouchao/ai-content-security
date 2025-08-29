@@ -1,0 +1,231 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html><head>
+
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta name="renderer" content="ie-stand">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="/system/login/new/css/style.css">
+
+		<script>
+		    var isaction = false;
+		    var str  ="[{image : '/system/login/new/img/backgrounds/1.jpg'}]";
+		    var defaultBackgroundImages = eval('(' + str + ')');
+		</script>
+		<script>
+function pwdauthoritycheckchecklen(min,max,password)
+{
+	var flag=false;
+	if(null!=password&&password!="")
+	{
+		if(password.length>=min&&password.length<=max)
+		{
+			flag=true;
+		}if(password.length<min)
+		{
+			//alert("密码长度至少"+min+"位!");
+		}if(password.length>max)
+		{
+			//alert("密码长度最多"+max+"位!");
+		}
+	}
+	else
+	{
+		//alert("请输入密码!");
+	}
+	return flag;
+}
+function pwdauthoritycheckb2i(flag)
+{
+	return flag?1:0;
+}
+function pwdauthoritycheckcheckchinese(password)
+{
+	var parrten = /^.*[\u4e00-\u9fa5]+.*$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckcheckupper(password)
+{
+	var parrten = /^.*[A-Z]+.*$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckchecklower(password)
+{
+	var parrten = /^.*[a-z]+.*$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckchecknum(password)
+{
+	var parrten = /^.*[0-9]+.*$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckcheckspecial(password)
+{
+	var parrten = /^.*[^a-zA-Z0-9_]+.*$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckcheckrepeat(password)
+{
+	var parrten = /^.*?(.+?)\1.*?$/;
+	if(null!=password&&password!="")
+	{
+		return parrten.test(password);
+	}
+	else
+	{
+		return false;
+	}
+}
+function pwdauthoritycheckcheckbylevel(level,min,max,password)
+{
+	var len = pwdauthoritycheckchecklen(min,max,password);
+	var upper = pwdauthoritycheckb2i(pwdauthoritycheckcheckupper(password));
+	var lower = pwdauthoritycheckb2i(pwdauthoritycheckchecklower(password));
+	var num = pwdauthoritycheckb2i(pwdauthoritycheckchecknum(password));
+	var special = pwdauthoritycheckb2i(pwdauthoritycheckcheckspecial(password));
+	var chinese = pwdauthoritycheckcheckchinese(password);
+	if(chinese)
+	{
+		return 0;
+	}
+	switch(level)
+	{
+		case 0:
+			if(len&&!chinese)return true;
+			else
+			{				return 0;	}
+		case 1:
+			if(len&&(upper+lower+num+special)>=2&&!chinese)return true;
+			else
+			{				return 0;	}
+		case 2:
+			if(len&&(upper+lower+num+special)>=3&&!chinese)return true;
+			else
+			{				return 0;	}
+		case 3:
+			if(len&&(upper+lower+num+special)==4&&!chinese)return true;
+			else
+			{				return 0;	}
+		case 4:
+			if(len&&(upper+lower+num+special)==4&&!chinese)return true;
+			else
+			{				return 0;	}
+		default :
+			if(len&&(upper+lower+num+special)>=2&&!chinese)return true;
+			else
+			{				return 0;	}
+	}
+	return 1;
+}
+function pwdauthoritycheckcheckPass(password)
+{
+	return pwdauthoritycheckcheckbylevel(1,7,20,password);
+}
+</script>
+
+                <script>var isoldbrowsers = false</script>
+		<script language="JavaScript" src="/system/resource/js/jquery/jquery-latest.min.js"></script>
+		<script language="JavaScript" src="/system/login/new/js/supersized.3.2.7.min.js"></script>
+		<script language="JavaScript" src="/system/login/new/js/supersized-init.js"></script>
+		<script language="javascript" src="/system/login/login.js?random=1756435540260"></script><link rel="stylesheet" content-type="text/css" href="/system/login/login.css">
+		<script language="javascript" src="/system/_js/base64.js"></script>
+		<script language="javascript" src="/system/_js/md5.js"></script>
+		<script language="javascript" src="/system/_js/browser.js"></script>
+        <script language="JavaScript" src="/system/_js/dialog.js"></script>
+        <script language="JavaScript" src="/system/frame/home.js"></script>
+        <script language="JavaScript" src="/system/frame/toppop.js"></script>
+        <script language="JavaScript" src="/system/frame/topfun.js"></script>
+
+	</head>
+
+	<body>
+	     <iframe id="popiframe" style="display:none;position:absolute" scrolling="auto" frameborder="0"></iframe>
+
+<form action="login.jsp" method="post" name="loginform" onsubmit="return checkData(this)" style="display: inline;margin: 0px;" autocomplete="off">
+<input type="hidden" name="action" value="login">
+<input type="hidden" name="password" id="password" value="">
+<input type="hidden" name="pwd_state" id="pwd_state" value="">
+<div id="topBox">
+    <img src="/system/_ui/product/login_logo_group_normal.png">
+</div>
+<div class="conterBox">
+<ul class="textBox">
+
+  <h2>网站群管理平台</h2>
+  <ul class="radioButton">
+    <ul>
+	    <li>
+	      <input id="vsblogintype0" type="radio" name="vsblogintype" value="0" checked="" onclick="logintypechange()">
+	    <i><label for="vsblogintype0">网站管理</label></i></li>
+	    <li>
+	      <input id="vsblogintype1" type="radio" name="vsblogintype" value="1" onclick="logintypechange()">
+	    <i><label for="vsblogintype1" style="vertical-align:middle">系统管理</label></i></li>
+	    
+	    </ul>
+  </ul>
+  <ul class="inputStyle">
+    <li><input type="text" name="user" id="user" class="inputCss inputToo1" style="ime-mode:disabled" autocomplete="off" maxlength="25"></li>
+	    <li><input type="password" id="password_temp" class="inputCss inputToo2" autocomplete="off" maxlength="25"></li>
+	    
+	    <li><input type="text" name="logincode" id="logincode" class="inputCss inputToo3" style="ime-mode1:disabled" maxlength="4/"><span><img src="/system/login/new/codeimg.jsp?randnum=1756435565256" id="codeimg" width="90" height="32" onclick="newchangeCodeImg()" title="看不清点我" align="absmiddle" style="cursor:pointer;"></span></li>
+	    <script>if(!bClosed)newchangeCodeImg();</script>
+	    
+  </ul>
+  <ul class="confirmSignIn">
+    <li class="blueButton"><input type="image" src="/system/login/new/img/textB06.png" width="292" height="57" class="newloginimage" onmousemove="loginimageOut(this)" onmouseout="loginimageIn(this)" onmousedown="loginimageOut(this)"></li>
+  </ul>
+</ul>
+
+  <ul class="prompt">
+   <li id="tip_td"></li>
+	  	
+	  		
+	  	
+  </ul>
+</div>
+	<div id="foot">西安博达软件股份有限公司版权所有<p>Copyright © 2000-2025 Xi'an Webber Software. All Rights Reserved.
+</p></div>
+	<div id="tip_div_content" onmouseout="out_div()" onmouseover="in_div()" style="color:#4F4644;text-align:left;letter-spacing:1px; position: absolute;display: none;font-size: 12px; line-height: 20px;background-color:#fff;width:345px;padding:10px;"></div>
+	<div id="tip_div_content2" onmouseout="out_link2()" style="color:#4F4644;text-align:left;letter-spacing:1px; position: absolute;display: none;font-size: 12px; line-height: 20px;background-color:#fff;width:270px;padding:10px;"></div>
+</form>
+
+<script>
+
+
+</script>
+
+<ul id="supersized" class="quality" style="visibility: visible;"><li class="slide-0 activeslide"><a target="_blank"><img src="/system/login/new/img/backgrounds/1.jpg" style="height: 1080px; width: 1928.57px; left: -4.5px; top: 0px;"></a></li></ul></body></html>

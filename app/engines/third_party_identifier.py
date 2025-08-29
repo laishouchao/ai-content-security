@@ -274,7 +274,7 @@ class ThirdPartyIdentifierEngine:
         self.classifier = DomainClassifier()
         self.identified_domains = {}
         
-    async def identify_third_party_domains(
+    async def identify_domain_records(
         self, 
         target_domain: str, 
         crawl_results: List[Any],
@@ -287,11 +287,11 @@ class ThirdPartyIdentifierEngine:
         all_domains = self._extract_domains_from_results(crawl_results)
         
         # 过滤第三方域名
-        third_party_domains = self._filter_third_party_domains(target_domain, all_domains)
+        domain_records = self._filter_domain_records(target_domain, all_domains)
         
         # 分类和风险评估
         results = []
-        for domain_info in third_party_domains:
+        for domain_info in domain_records:
             domain = domain_info['domain']
             found_urls = domain_info['found_on_urls']
             
@@ -369,9 +369,8 @@ class ThirdPartyIdentifierEngine:
                     if ':' in domain:
                         domain = domain.split(':')[0]
                     
-                    # 移除www前缀
-                    if domain.startswith('www.'):
-                        domain = domain[4:]
+                    # 不再移除 www 前缀，保持原始域名
+                    # 这样 www.example.com 会被正确识别为子域名，而不是第三方域名
                     
                     if domain not in domain_urls:
                         domain_urls[domain] = []
@@ -382,31 +381,79 @@ class ThirdPartyIdentifierEngine:
             except Exception as e:
                 self.logger.debug(f"URL解析失败: {url} - {e}")
     
-    def _filter_third_party_domains(self, target_domain: str, all_domains: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    def _filter_domain_records(self, target_domain: str, all_domains: Dict[str, List[str]]) -> List[Dict[str, Any]]:
         """过滤出第三方域名"""
         target_domain_lower = target_domain.lower()
-        third_party_domains = []
+        domain_records = []
         
         for domain, found_urls in all_domains.items():
             # 排除目标域名及其子域名
             if not self._is_same_or_subdomain(domain, target_domain_lower):
                 # 排除本地和内网地址
                 if not self._is_local_domain(domain):
-                    third_party_domains.append({
+                    domain_records.append({
                         'domain': domain,
                         'found_on_urls': found_urls
                     })
         
-        return third_party_domains
+        return domain_records
     
     def _is_same_or_subdomain(self, domain: str, target_domain: str) -> bool:
-        """检查是否为相同域名或子域名"""
-        domain_lower = domain.lower()
-        target_lower = target_domain.lower()
-        
-        return (domain_lower == target_lower or 
-                domain_lower.endswith(f'.{target_lower}') or
-                target_lower.endswith(f'.{domain_lower}'))
+        """检查是否为相同域名或子域名（强化版本）"""
+        try:
+            domain_lower = domain.lower().strip()
+            target_lower = target_domain.lower().strip()
+            
+            # 完全相同
+            if domain_lower == target_lower:
+                return True
+            
+            # 基本的子域名检查
+            if domain_lower.endswith(f'.{target_lower}'):
+                return True
+            
+            # 反向检查（目标域名是否为当前域名的子域名）
+            if target_lower.endswith(f'.{domain_lower}'):
+                return True
+            
+            # 使用tldextract进行精确的域名解析
+            domain_extracted = tldextract.extract(domain_lower)
+            target_extracted = tldextract.extract(target_lower)
+            
+            # 检查注册域名是否相同
+            domain_registered = domain_extracted.registered_domain.lower()
+            target_registered = target_extracted.registered_domain.lower()
+            
+            # 如果注册域名不同，则不是子域名
+            if domain_registered != target_registered:
+                return False
+            
+            # 如果注册域名相同，进一步检查子域名关系
+            domain_full = f"{domain_extracted.subdomain}.{domain_registered}" if domain_extracted.subdomain else domain_registered
+            target_full = f"{target_extracted.subdomain}.{target_registered}" if target_extracted.subdomain else target_registered
+            
+            # 清理可能的空子域名前缀
+            domain_full = domain_full.lstrip('.')
+            target_full = target_full.lstrip('.')
+            
+            # 检查子域名关系
+            result = (domain_full == target_full or 
+                     domain_full.endswith(f'.{target_full}') or 
+                     target_full.endswith(f'.{domain_full}'))
+            
+            if result:
+                self.logger.debug(f"确认 {domain} 是 {target_domain} 的子域名或相关域名")
+            else:
+                self.logger.debug(f"确认 {domain} 不是 {target_domain} 的子域名")
+            
+            return result
+                    
+        except Exception as e:
+            self.logger.warning(f"域名关系检查失败 {domain} vs {target_domain}: {e}")
+            # 如果解析失败，回退到基本字符串匹配
+            return (domain_lower == target_lower or 
+                    domain_lower.endswith(f'.{target_lower}') or
+                    target_lower.endswith(f'.{domain_lower}'))
     
     def _is_local_domain(self, domain: str) -> bool:
         """检查是否为本地或内网域名"""

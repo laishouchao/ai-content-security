@@ -303,62 +303,36 @@ class SmartAIPrefilter:
     async def should_analyze_with_ai(self, content_result: ContentResult) -> Tuple[bool, str, Dict[str, Any]]:
         """
         判断是否需要AI分析
+        修改为强制分析模式，确保所有内容都进行AI分析
         返回: (是否需要AI分析, 原因, 详细分析结果)
         """
         self.total_processed += 1
         
         try:
-            # 基础检查
+            # 基础检查 - 仅检查截图文件是否存在
             if not content_result.screenshot_path or not os.path.exists(content_result.screenshot_path):
                 self.ai_calls_skipped += 1
                 return False, "no_screenshot", {}
             
-            # 文件大小检查
+            # 文件大小检查 - 仅检查文件是否太小
             file_size = os.path.getsize(content_result.screenshot_path)
             if file_size < 1024:  # 小于1KB
                 self.ai_calls_skipped += 1
                 return False, "screenshot_too_small", {'file_size': file_size}
             
-            # 计算perceptual hash用于去重
-            phash = await self._calculate_perceptual_hash(content_result.screenshot_path)
-            if phash in self.analysis_cache:
-                self.cache_hits += 1
-                cached_result = self.analysis_cache[phash]
-                return cached_result['needs_ai'], f"cache_hit_{cached_result['reason']}", cached_result
+            # 强制进行AI分析，不进行复杂的预筛选
+            self.ai_calls_made += 1
+            self.logger.info(f"✅ 强制AI分析: {content_result.url}")
             
-            self.cache_misses += 1
-            
-            # 图像特征分析
-            image_features = self.image_analyzer.analyze_image_features(content_result.screenshot_path)
-            
-            # URL风险分析
-            url_features = self.url_analyzer.analyze_url_risk(content_result.url)
-            
-            # 内容特征分析
-            content_features = self.content_analyzer.analyze_content_features(content_result)
-            
-            # 综合决策
-            decision_result = self._make_analysis_decision(
-                image_features, url_features, content_features
-            )
-            
-            # 缓存结果
-            cache_entry = {
-                'needs_ai': decision_result['needs_ai'],
-                'reason': decision_result['reason'],
-                'image_features': image_features,
-                'url_features': url_features,
-                'content_features': content_features,
-                'decision_score': decision_result['decision_score']
+            # 返回简单的分析结果
+            analysis_result = {
+                'needs_ai': True,
+                'reason': 'force_analyze_all',
+                'file_size': file_size,
+                'url': content_result.url
             }
-            self.analysis_cache[phash] = cache_entry
             
-            if decision_result['needs_ai']:
-                self.ai_calls_made += 1
-            else:
-                self.ai_calls_skipped += 1
-            
-            return decision_result['needs_ai'], decision_result['reason'], cache_entry
+            return True, "force_analyze_all", analysis_result
             
         except Exception as e:
             self.logger.warning(f"预筛选分析失败: {e}")

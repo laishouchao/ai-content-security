@@ -53,7 +53,7 @@ class AIAnalysisOutputManager:
             }
             
             # 读取截图并转换为Base64
-            if Path(screenshot_path).exists():
+            if screenshot_path and Path(screenshot_path).exists():
                 with open(screenshot_path, 'rb') as f:
                     screenshot_base64 = base64.b64encode(f.read()).decode('utf-8')
                     input_data['screenshot_base64'] = screenshot_base64
@@ -63,7 +63,7 @@ class AIAnalysisOutputManager:
                 input_data['screenshot_error'] = f"截图文件不存在: {screenshot_path}"
             
             # 读取源码
-            if Path(source_code_path).exists():
+            if source_code_path and Path(source_code_path).exists():
                 with open(source_code_path, 'r', encoding='utf-8') as f:
                     source_code = f.read()
                     input_data['source_code'] = source_code[:10000]  # 限制长度

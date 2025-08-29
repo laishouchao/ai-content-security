@@ -33,7 +33,7 @@ class TaskConfigSchema(BaseModel):
     use_parallel_executor: Optional[bool] = Field(True, description="使用并行执行器")
     smart_prefilter_enabled: Optional[bool] = Field(True, description="启用智能AI预筛选")
     dns_concurrency: Optional[int] = Field(100, ge=10, le=200, description="DNS查询并发数")
-    ai_skip_threshold: Optional[float] = Field(0.3, ge=0.1, le=0.8, description="AI跳过阈值")
+    ai_skip_threshold: Optional[float] = Field(0.0, ge=0.0, le=0.8, description="AI跳过阈值（0.0表示不跳过任何分析）")
     multi_viewport_capture: Optional[bool] = Field(False, description="多视角截图")
     enable_aggressive_caching: Optional[bool] = Field(False, description="激进缓存策略")
     
@@ -49,9 +49,9 @@ class TaskConfigSchema(BaseModel):
     
     @validator('ai_skip_threshold')
     def validate_ai_skip_threshold(cls, v):
-        """验证AI跳过阈值"""
-        if v is not None and not 0.1 <= v <= 0.8:
-            raise ValueError('AI跳过阈值必须在0.1到0.8之间')
+        """验证AI跳过阈值（允许0.0以实现不跳过任何分析）"""
+        if v is not None and not 0.0 <= v <= 0.8:
+            raise ValueError('AI跳过阈值必须在0.0到0.8之间（0.0表示不跳过任何分析）')
         return v
     
     @validator('dns_concurrency')
@@ -77,7 +77,7 @@ class TaskConfigSchema(BaseModel):
                 "use_parallel_executor": True,
                 "smart_prefilter_enabled": True,
                 "dns_concurrency": 100,
-                "ai_skip_threshold": 0.3,
+                "ai_skip_threshold": 0.0,
                 "multi_viewport_capture": False,
                 "enable_aggressive_caching": False
             }
@@ -193,7 +193,7 @@ class TaskConfigPresetSchema(BaseModel):
                     "use_parallel_executor": True,
                     "smart_prefilter_enabled": True,
                     "dns_concurrency": 50,
-                    "ai_skip_threshold": 0.2,
+                    "ai_skip_threshold": 0.0,
                     "max_subdomains": 50,
                     "max_crawl_depth": 2
                 }
@@ -220,7 +220,7 @@ TASK_CONFIG_PRESETS = {
             use_parallel_executor=True,
             smart_prefilter_enabled=True,
             dns_concurrency=50,
-            ai_skip_threshold=0.2,
+            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=False,
             enable_aggressive_caching=True,
             certificate_discovery_enabled=True,
@@ -249,7 +249,7 @@ TASK_CONFIG_PRESETS = {
             use_parallel_executor=True,
             smart_prefilter_enabled=True,
             dns_concurrency=100,
-            ai_skip_threshold=0.3,
+            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=False,
             enable_aggressive_caching=False,
             certificate_discovery_enabled=True,
@@ -278,7 +278,7 @@ TASK_CONFIG_PRESETS = {
             use_parallel_executor=True,
             smart_prefilter_enabled=True,
             dns_concurrency=150,
-            ai_skip_threshold=0.4,
+            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=True,
             enable_aggressive_caching=False,
             certificate_discovery_enabled=True,
@@ -307,7 +307,7 @@ TASK_CONFIG_PRESETS = {
             use_parallel_executor=True,
             smart_prefilter_enabled=True,
             dns_concurrency=100,
-            ai_skip_threshold=0.1,  # 最激进的AI跳过
+            ai_skip_threshold=0.0,  # 即使是成本优化也不跳过AI分析
             multi_viewport_capture=False,
             enable_aggressive_caching=True,
             certificate_discovery_enabled=True,

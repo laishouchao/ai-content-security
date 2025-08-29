@@ -45,7 +45,7 @@ def convert_task_to_response(task) -> Dict[str, Any]:
         "config": safe_get_value(task, 'config') or {},
         "total_subdomains": int(safe_get_value(task, 'total_subdomains', 0)),
         "total_pages_crawled": int(safe_get_value(task, 'total_pages_crawled', 0)),
-        "total_third_party_domains": int(safe_get_value(task, 'total_third_party_domains', 0)),
+        "total_domain_records": int(safe_get_value(task, 'total_domain_records', 0)),
         "total_violations": int(safe_get_value(task, 'total_violations', 0)),
         "critical_violations": int(safe_get_value(task, 'critical_violations', 0)),
         "high_violations": int(safe_get_value(task, 'high_violations', 0)),
@@ -102,7 +102,7 @@ async def create_scan_task(
             'use_parallel_executor': True,
             'smart_prefilter_enabled': True,
             'dns_concurrency': 100,
-            'ai_skip_threshold': 0.3,
+            'ai_skip_threshold': 0.0,  # 不跳过任何AI分析
             'multi_viewport_capture': False
         }
         
@@ -293,7 +293,7 @@ async def get_scan_task(
                 "statistics": {
                     "total_subdomains": task.total_subdomains,
                     "total_pages_crawled": task.total_pages_crawled,
-                    "total_third_party_domains": task.total_third_party_domains,
+                    "total_domain_records": task.total_domain_records,
                     "total_violations": task.total_violations,
                     "critical_violations": task.critical_violations,
                     "high_violations": task.high_violations,
@@ -302,7 +302,7 @@ async def get_scan_task(
                 },
                 "total_subdomains": task.total_subdomains,
                 "total_pages_crawled": task.total_pages_crawled,
-                "total_third_party_domains": task.total_third_party_domains,
+                "total_domain_records": task.total_domain_records,
                 "total_violations": task.total_violations,
                 "critical_violations": task.critical_violations,
                 "high_violations": task.high_violations,
@@ -485,7 +485,7 @@ async def get_config_presets(
                     use_parallel_executor=True,
                     smart_prefilter_enabled=True,
                     dns_concurrency=100,
-                    ai_skip_threshold=0.2,
+                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=3,
                     multi_viewport_capture=False,
                     enable_aggressive_caching=False,
@@ -513,7 +513,7 @@ async def get_config_presets(
                     use_parallel_executor=True,
                     smart_prefilter_enabled=True,
                     dns_concurrency=100,
-                    ai_skip_threshold=0.3,
+                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=5,
                     multi_viewport_capture=True,
                     enable_aggressive_caching=False,
@@ -541,7 +541,7 @@ async def get_config_presets(
                     use_parallel_executor=True,
                     smart_prefilter_enabled=True,
                     dns_concurrency=150,
-                    ai_skip_threshold=0.4,
+                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=8,
                     multi_viewport_capture=True,
                     enable_aggressive_caching=False,
@@ -569,7 +569,7 @@ async def get_config_presets(
                     use_parallel_executor=True,
                     smart_prefilter_enabled=True,
                     dns_concurrency=100,
-                    ai_skip_threshold=0.1,
+                    ai_skip_threshold=0.0,  # 用户要求全部进行扫描，不跳过AI分析
                     max_crawl_iterations=4,
                     multi_viewport_capture=False,
                     enable_aggressive_caching=True,
@@ -781,7 +781,7 @@ async def retry_scan_task(
             # 重置统计信息
             total_subdomains=0,
             total_pages_crawled=0,
-            total_third_party_domains=0,
+            total_domain_records=0,
             total_violations=0,
             critical_violations=0,
             high_violations=0,
@@ -878,7 +878,7 @@ async def get_task_status(
                 "statistics": {
                     "total_subdomains": task.total_subdomains,
                     "total_pages_crawled": task.total_pages_crawled,
-                    "total_third_party_domains": task.total_third_party_domains,
+                    "total_domain_records": task.total_domain_records,
                     "total_violations": task.total_violations,
                     "critical_violations": task.critical_violations,
                     "high_violations": task.high_violations,
@@ -926,17 +926,17 @@ async def get_task_subdomains(
             )
         
         # 查询总数
-        from app.models.task import SubdomainRecord
-        count_query = select(func.count(SubdomainRecord.id)).where(
-            SubdomainRecord.task_id == task_id
+        from app.models.domain import DomainRecord
+        count_query = select(func.count(DomainRecord.id)).where(
+            DomainRecord.task_id == task_id
         )
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
         
         # 查询子域名记录列表
-        query = select(SubdomainRecord).where(
-            SubdomainRecord.task_id == task_id
-        ).order_by(SubdomainRecord.created_at.desc()).offset(skip).limit(limit)
+        query = select(DomainRecord).where(
+            DomainRecord.task_id == task_id
+        ).order_by(DomainRecord.created_at.desc()).offset(skip).limit(limit)
         
         result = await db.execute(query)
         subdomains = result.scalars().all()
@@ -1069,7 +1069,7 @@ async def get_task_violations(
 
 
 @router.get("/{task_id}/domains")
-async def get_task_third_party_domains(
+async def get_task_domain_records(
     task_id: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -1097,14 +1097,14 @@ async def get_task_third_party_domains(
             )
         
         # 查询总数
-        from app.models.task import ThirdPartyDomain
-        conditions = [ThirdPartyDomain.task_id == task_id]
+        from app.models.domain import DomainRecord
+        conditions = [DomainRecord.task_id == task_id]
         if domain_type:
-            conditions.append(ThirdPartyDomain.domain_type == domain_type)
+            conditions.append(DomainRecord.domain_type == domain_type)
         if risk_level:
-            conditions.append(ThirdPartyDomain.risk_level == risk_level)
+            conditions.append(DomainRecord.risk_level == risk_level)
         
-        count_query = select(func.count(ThirdPartyDomain.id)).where(
+        count_query = select(func.count(DomainRecord.id)).where(
             and_(*conditions)
         )
         total_result = await db.execute(count_query)
@@ -1114,11 +1114,11 @@ async def get_task_third_party_domains(
         from sqlalchemy.orm import selectinload
         from app.models.task import ViolationRecord
         
-        query = select(ThirdPartyDomain).options(
-            selectinload(ThirdPartyDomain.violations)
+        query = select(DomainRecord).options(
+            selectinload(DomainRecord.violations)
         ).where(
             and_(*conditions)
-        ).order_by(ThirdPartyDomain.created_at.desc()).offset(skip).limit(limit)
+        ).order_by(DomainRecord.created_at.desc()).offset(skip).limit(limit)
         
         result = await db.execute(query)
         domains = result.scalars().all()
@@ -1182,6 +1182,292 @@ async def get_task_third_party_domains(
         raise HTTPException(
             status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
             detail="获取第三方域名记录失败"
+        )
+
+
+# 新增：统一域名管理接口
+@router.get("/{task_id}/scan-domains")
+async def get_task_scan_domains(
+    task_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    category_filter: Optional[str] = Query(None, alias="category"),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """获取任务的需要扫描的域名列表（目标域名和子域名）"""
+    try:
+        # 验证任务存在且属于当前用户
+        task_query = select(ScanTask).where(
+            and_(
+                ScanTask.id == task_id,
+                ScanTask.user_id == current_user.id
+            )
+        )
+        task_result = await db.execute(task_query)
+        task = task_result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在或无权访问"
+            )
+        
+        # 导入新的域名模型
+        from app.models.domain import DomainRecord, DomainCategory, DomainStatus
+        
+        # 构建查询条件 - 只查询目标相关域名
+        conditions = [
+            DomainRecord.task_id == task_id,
+            or_(
+                DomainRecord.category == DomainCategory.TARGET_MAIN,
+                DomainRecord.category == DomainCategory.TARGET_SUBDOMAIN
+            )
+        ]
+        
+        # 应用过滤器
+        if status_filter:
+            conditions.append(DomainRecord.status == status_filter)
+        if category_filter:
+            conditions.append(DomainRecord.category == category_filter)
+        if search:
+            conditions.append(DomainRecord.domain.contains(search))
+        
+        # 查询总数
+        count_query = select(func.count(DomainRecord.id)).where(and_(*conditions))
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # 查询域名列表
+        query = select(DomainRecord).where(
+            and_(*conditions)
+        ).order_by(DomainRecord.first_discovered_at.desc()).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
+        domains = result.scalars().all()
+        
+        # 转换为响应格式
+        domain_list = []
+        for domain in domains:
+            domain_data = {
+                "id": domain.id,
+                "task_id": domain.task_id,
+                "domain": domain.domain,
+                "category": domain.category,
+                "status": domain.status,
+                "discovery_method": domain.discovery_method,
+                "ip_address": domain.ip_address,
+                "is_accessible": domain.is_accessible,
+                "response_code": domain.response_code,
+                "response_time": domain.response_time,
+                "server_header": domain.server_header,
+                "content_type": domain.content_type,
+                "page_title": domain.page_title,
+                "parent_domain": domain.parent_domain,
+                "depth_level": domain.depth_level,
+                "risk_level": domain.risk_level,
+                "confidence_score": domain.confidence_score,
+                "is_analyzed": domain.is_analyzed,
+                "first_discovered_at": domain.first_discovered_at.isoformat() if safe_get_value(domain, 'first_discovered_at') else None,
+                "last_updated_at": domain.last_updated_at.isoformat() if safe_get_value(domain, 'last_updated_at') else None,
+                "tags": domain.tags or []
+            }
+            domain_list.append(domain_data)
+        
+        return {
+            "success": True,
+            "data": {
+                "items": domain_list,
+                "total": total,
+                "skip": skip,
+                "limit": limit
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取扫描域名失败: {e}")
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
+            detail="获取扫描域名失败"
+        )
+
+
+@router.get("/{task_id}/all-domains")
+async def get_task_all_domains(
+    task_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    category_filter: Optional[str] = Query(None, alias="category"),
+    risk_level_filter: Optional[str] = Query(None, alias="risk_level"),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """获取任务检测到的所有域名列表"""
+    try:
+        # 验证任务存在且属于当前用户
+        task_query = select(ScanTask).where(
+            and_(
+                ScanTask.id == task_id,
+                ScanTask.user_id == current_user.id
+            )
+        )
+        task_result = await db.execute(task_query)
+        task = task_result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在或无权访问"
+            )
+        
+        # 导入新的域名模型
+        from app.models.domain import DomainRecord
+        
+        # 构建查询条件
+        conditions = [DomainRecord.task_id == task_id]
+        
+        # 应用过滤器
+        if category_filter:
+            conditions.append(DomainRecord.category == category_filter)
+        if risk_level_filter:
+            conditions.append(DomainRecord.risk_level == risk_level_filter)
+        if search:
+            conditions.append(DomainRecord.domain.contains(search))
+        
+        # 查询总数
+        count_query = select(func.count(DomainRecord.id)).where(and_(*conditions))
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # 查询域名列表
+        query = select(DomainRecord).where(
+            and_(*conditions)
+        ).order_by(DomainRecord.first_discovered_at.desc()).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
+        domains = result.scalars().all()
+        
+        # TODO: 查询违规记录关联
+        
+        # 转换为响应格式
+        domain_list = []
+        for domain in domains:
+            domain_data = {
+                "id": domain.id,
+                "task_id": domain.task_id,
+                "domain": domain.domain,
+                "category": domain.category,
+                "status": domain.status,
+                "discovery_method": domain.discovery_method,
+                "ip_address": domain.ip_address,
+                "is_accessible": domain.is_accessible,
+                "response_code": domain.response_code,
+                "page_title": domain.page_title,
+                "page_description": domain.page_description,
+                "parent_domain": domain.parent_domain,
+                "depth_level": domain.depth_level,
+                "risk_level": domain.risk_level,
+                "confidence_score": domain.confidence_score,
+                "is_analyzed": domain.is_analyzed,
+                "first_discovered_at": domain.first_discovered_at.isoformat() if safe_get_value(domain, 'first_discovered_at') else None,
+                "last_updated_at": domain.last_updated_at.isoformat() if safe_get_value(domain, 'last_updated_at') else None,
+                "has_violations": False,  # TODO: 从违规记录计算
+                "is_target_related": domain.category in ['target_main', 'target_subdomain'],
+                "is_third_party": domain.category == 'third_party',
+                "tags": domain.tags or []
+            }
+            domain_list.append(domain_data)
+        
+        return {
+            "success": True,
+            "data": {
+                "items": domain_list,
+                "total": total,
+                "skip": skip,
+                "limit": limit
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取所有域名失败: {e}")
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
+            detail="获取所有域名失败"
+        )
+
+
+@router.get("/{task_id}/domain-stats")
+async def get_task_domain_stats(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Any:
+    """获取任务的域名统计信息"""
+    try:
+        # 验证任务存在且属于当前用户
+        task_query = select(ScanTask).where(
+            and_(
+                ScanTask.id == task_id,
+                ScanTask.user_id == current_user.id
+            )
+        )
+        task_result = await db.execute(task_query)
+        task = task_result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在或无权访问"
+            )
+        
+        # 导入新的域名模型
+        from app.models.domain import DomainRecord, DomainCategory, DomainStatus, RiskLevel
+        
+        # 查询所有域名
+        query = select(DomainRecord).where(DomainRecord.task_id == task_id)
+        result = await db.execute(query)
+        domains = result.scalars().all()
+        
+        # 计算统计信息
+        total_domains = len(domains)
+        target_domains = sum(1 for d in domains if safe_get_value(d, 'category') == DomainCategory.TARGET_MAIN)
+        subdomain_count = sum(1 for d in domains if safe_get_value(d, 'category') == DomainCategory.TARGET_SUBDOMAIN)
+        third_party_count = sum(1 for d in domains if safe_get_value(d, 'category') == DomainCategory.THIRD_PARTY)
+        accessible_count = sum(1 for d in domains if safe_get_value(d, 'is_accessible', False))
+        analyzed_count = sum(1 for d in domains if safe_get_value(d, 'is_analyzed', False))
+        
+        # TODO: 从违规记录计算违规域名数量
+        violation_count = 0
+        
+        stats = {
+            "total_domains": total_domains,
+            "target_domains": target_domains,
+            "subdomain_count": subdomain_count,
+            "third_party_count": third_party_count,
+            "accessible_count": accessible_count,
+            "analyzed_count": analyzed_count,
+            "violation_count": violation_count
+        }
+        
+        return {
+            "success": True,
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取域名统计失败: {e}")
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500),
+            detail="获取域名统计失败"
         )
 
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.logging import TaskLogger
 from app.core.database import AsyncSessionLocal
-from app.models.task import ScanTask, TaskStatus, TaskLog, SubdomainRecord, ThirdPartyDomain, ViolationRecord
+from app.models.domain import DomainRecord
 from app.engines.scan_executor import ScanTaskExecutor, ScanExecutionResult
 from app.engines.parallel_scan_executor import ParallelScanExecutor
 from app.websocket.handlers import task_monitor, TaskMonitorHandler
@@ -299,7 +299,7 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
     try:
         # 保存子域名记录
         for subdomain in scan_result.subdomains:
-            subdomain_record = SubdomainRecord(
+            subdomain_record = DomainRecord(
                 task_id=scan_result.task_id,
                 subdomain=subdomain.subdomain,
                 ip_address=subdomain.ip_address,
@@ -314,11 +314,11 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
         
         # 保存第三方域名记录（检查是否已存在）
         from sqlalchemy import select
-        for third_party in scan_result.third_party_domains:
+        for third_party in scan_result.domain_records:
             # 检查是否已经存在
-            existing_query = select(ThirdPartyDomain).where(
-                ThirdPartyDomain.task_id == scan_result.task_id,
-                ThirdPartyDomain.domain == third_party.domain
+            existing_query = select(DomainRecord).where(
+                DomainRecord.task_id == scan_result.task_id,
+                DomainRecord.domain == third_party.domain
             )
             existing_result = await db.execute(existing_query)
             existing_domain = existing_result.scalar_one_or_none()
@@ -347,7 +347,7 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
                         # 可以保存HTML内容到文件
                         break
                 
-                third_party_record = ThirdPartyDomain(
+                third_party_record = DomainRecord(
                     task_id=scan_result.task_id,
                     domain=third_party.domain,
                     found_on_url=', '.join(third_party.found_on_urls[:3]),  # 限制长度
@@ -374,7 +374,7 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
                     try:
                         # 获取域名信息
                         from sqlalchemy import select
-                        domain_query = select(ThirdPartyDomain).where(ThirdPartyDomain.id == violation.domain_id)
+                        domain_query = select(DomainRecord).where(DomainRecord.id == violation.domain_id)
                         domain_result = await db.execute(domain_query)
                         domain_record = domain_result.scalar_one_or_none()
                         
@@ -407,7 +407,7 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
         update_data = {
             'total_subdomains': scan_result.statistics['total_subdomains'],
             'total_pages_crawled': scan_result.statistics['total_pages_crawled'],
-            'total_third_party_domains': scan_result.statistics['total_third_party_domains'],
+            'total_domain_records': scan_result.statistics['total_domain_records'],
             'total_violations': scan_result.statistics.get('total_violations', 0),  # 包含AI分析的违规数量
             'critical_violations': 0,
             'high_violations': 0,
@@ -527,7 +527,7 @@ def _convert_parallel_result_to_scan_result(parallel_result: Dict[str, Any]) -> 
     scan_result.crawl_results = results.get('crawl_results', [])
     
     # 第三方域名
-    scan_result.third_party_domains = results.get('third_party_domains', [])
+    scan_result.domain_records = results.get('domain_records', [])
     
     # 内容结果
     scan_result.content_results = results.get('content_results', [])

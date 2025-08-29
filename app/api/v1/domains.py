@@ -7,7 +7,8 @@ import logging
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.models.task import ThirdPartyDomain, ViolationRecord
+from app.models.domain import DomainRecord
+from app.models.task import ViolationRecord
 
 logger = logging.getLogger(__name__)
 
@@ -31,27 +32,27 @@ async def get_all_domains(
         
         # 支持域名模糊搜索
         if domain:
-            conditions.append(ThirdPartyDomain.domain.ilike(f"%{domain}%"))
+            conditions.append(DomainRecord.domain.ilike(f"%{domain}%"))
         
         # 域名类型筛选
         if domain_type:
-            conditions.append(ThirdPartyDomain.domain_type == domain_type)
+            conditions.append(DomainRecord.domain_type == domain_type)
         
         # 风险等级筛选
         if risk_level:
-            conditions.append(ThirdPartyDomain.risk_level == risk_level)
+            conditions.append(DomainRecord.risk_level == risk_level)
         
         # 违规状态筛选
         if has_violations is not None:
             if has_violations:
                 # 有违规记录的域名
-                conditions.append(ThirdPartyDomain.violations.any())
+                conditions.append(DomainRecord.violations.any())
             else:
                 # 无违规记录的域名
-                conditions.append(~ThirdPartyDomain.violations.any())
+                conditions.append(~DomainRecord.violations.any())
         
         # 查询总数
-        count_query = select(func.count(ThirdPartyDomain.id)).where(
+        count_query = select(func.count(DomainRecord.id)).where(
             and_(*conditions)
         )
         total_result = await db.execute(count_query)
@@ -60,11 +61,11 @@ async def get_all_domains(
         # 查询域名列表，包含违规记录
         from sqlalchemy.orm import selectinload
         
-        query = select(ThirdPartyDomain).options(
-            selectinload(ThirdPartyDomain.violations)
+        query = select(DomainRecord).options(
+            selectinload(DomainRecord.violations)
         ).where(
             and_(*conditions)
-        ).order_by(ThirdPartyDomain.created_at.desc()).offset(skip).limit(limit)
+        ).order_by(DomainRecord.created_at.desc()).offset(skip).limit(limit)
         
         result = await db.execute(query)
         domains = result.scalars().all()
@@ -144,10 +145,10 @@ async def get_domain_detail(
         # 查询域名详情，包含违规记录
         from sqlalchemy.orm import selectinload
         
-        query = select(ThirdPartyDomain).options(
-            selectinload(ThirdPartyDomain.violations)
+        query = select(DomainRecord).options(
+            selectinload(DomainRecord.violations)
         ).where(
-            ThirdPartyDomain.id == domain_id
+            DomainRecord.id == domain_id
         )
         
         result = await db.execute(query)
@@ -228,8 +229,8 @@ async def get_domain_violations(
     """获取域名的违规记录"""
     try:
         # 验证域名存在
-        domain_query = select(ThirdPartyDomain).where(
-            ThirdPartyDomain.id == domain_id
+        domain_query = select(DomainRecord).where(
+            DomainRecord.id == domain_id
         )
         domain_result = await db.execute(domain_query)
         domain = domain_result.scalar_one_or_none()
@@ -310,13 +311,13 @@ async def get_domain_stats(
     """获取域名统计信息"""
     try:
         # 总域名数
-        total_query = select(func.count(ThirdPartyDomain.id))
+        total_query = select(func.count(DomainRecord.id))
         total_result = await db.execute(total_query)
         total_domains = total_result.scalar() or 0
         
         # 已分析域名数
-        analyzed_query = select(func.count(ThirdPartyDomain.id)).where(
-            ThirdPartyDomain.is_analyzed == True
+        analyzed_query = select(func.count(DomainRecord.id)).where(
+            DomainRecord.is_analyzed == True
         )
         analyzed_result = await db.execute(analyzed_query)
         analyzed_domains = analyzed_result.scalar() or 0
@@ -325,17 +326,17 @@ async def get_domain_stats(
         unanalyzed_domains = total_domains - analyzed_domains
         
         # 有违规记录的域名数
-        violation_query = select(func.count(ThirdPartyDomain.id)).where(
-            ThirdPartyDomain.violations.any()
+        violation_query = select(func.count(DomainRecord.id)).where(
+            DomainRecord.violations.any()
         )
         violation_result = await db.execute(violation_query)
         violation_domains = violation_result.scalar() or 0
         
         # 域名类型分布
         type_distribution_query = select(
-            ThirdPartyDomain.domain_type,
-            func.count(ThirdPartyDomain.id)
-        ).group_by(ThirdPartyDomain.domain_type)
+            DomainRecord.domain_type,
+            func.count(DomainRecord.id)
+        ).group_by(DomainRecord.domain_type)
         
         type_result = await db.execute(type_distribution_query)
         domain_type_distribution = {
@@ -344,9 +345,9 @@ async def get_domain_stats(
         
         # 风险等级分布
         risk_distribution_query = select(
-            ThirdPartyDomain.risk_level,
-            func.count(ThirdPartyDomain.id)
-        ).group_by(ThirdPartyDomain.risk_level)
+            DomainRecord.risk_level,
+            func.count(DomainRecord.id)
+        ).group_by(DomainRecord.risk_level)
         
         risk_result = await db.execute(risk_distribution_query)
         risk_level_distribution = {
@@ -354,8 +355,8 @@ async def get_domain_stats(
         }
         
         # 最近添加的域名
-        recent_query = select(ThirdPartyDomain).order_by(
-            ThirdPartyDomain.created_at.desc()
+        recent_query = select(DomainRecord).order_by(
+            DomainRecord.created_at.desc()
         ).limit(10)
         
         recent_result = await db.execute(recent_query)
@@ -409,8 +410,8 @@ async def reanalyze_domain(
     """重新分析域名"""
     try:
         # 查询域名
-        query = select(ThirdPartyDomain).where(
-            ThirdPartyDomain.id == domain_id
+        query = select(DomainRecord).where(
+            DomainRecord.id == domain_id
         )
         
         result = await db.execute(query)
@@ -491,8 +492,8 @@ async def batch_delete_domains(
             )
         
         # 查询要删除的域名
-        query = select(ThirdPartyDomain).where(
-            ThirdPartyDomain.id.in_(domain_ids)
+        query = select(DomainRecord).where(
+            DomainRecord.id.in_(domain_ids)
         )
         
         result = await db.execute(query)
@@ -552,28 +553,28 @@ async def export_domains(
         conditions = []
         
         if domain:
-            conditions.append(ThirdPartyDomain.domain.ilike(f"%{domain}%"))
+            conditions.append(DomainRecord.domain.ilike(f"%{domain}%"))
         
         if domain_type:
-            conditions.append(ThirdPartyDomain.domain_type == domain_type)
+            conditions.append(DomainRecord.domain_type == domain_type)
         
         if risk_level:
-            conditions.append(ThirdPartyDomain.risk_level == risk_level)
+            conditions.append(DomainRecord.risk_level == risk_level)
         
         if has_violations is not None:
             if has_violations:
-                conditions.append(ThirdPartyDomain.violations.any())
+                conditions.append(DomainRecord.violations.any())
             else:
-                conditions.append(~ThirdPartyDomain.violations.any())
+                conditions.append(~DomainRecord.violations.any())
         
         # 查询域名数据
         from sqlalchemy.orm import selectinload
         
-        query = select(ThirdPartyDomain).options(
-            selectinload(ThirdPartyDomain.violations)
+        query = select(DomainRecord).options(
+            selectinload(DomainRecord.violations)
         ).where(
             and_(*conditions)
-        ).order_by(ThirdPartyDomain.created_at.desc())
+        ).order_by(DomainRecord.created_at.desc())
         
         result = await db.execute(query)
         domains = result.scalars().all()
