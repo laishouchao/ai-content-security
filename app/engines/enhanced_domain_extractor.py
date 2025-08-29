@@ -24,7 +24,7 @@ from datetime import datetime
 from collections import defaultdict
 import ssl
 
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup, Comment, Tag
 from app.core.logging import TaskLogger
 
 
@@ -256,9 +256,9 @@ class EnhancedDomainExtractor:
             
             meta_description = None
             meta_tag = soup.find('meta', attrs={'name': 'description'})
-            if meta_tag and hasattr(meta_tag, 'get'):
+            if meta_tag and isinstance(meta_tag, Tag):
                 content = meta_tag.get('content')
-                if content:
+                if content and isinstance(content, str):
                     meta_description = content.strip()
             
             # 提取所有链接
@@ -354,7 +354,7 @@ class EnhancedDomainExtractor:
     
     def _extract_domains_from_links(self, links: List[ExtractedLink]) -> List[ExtractedDomain]:
         """从链接中提取域名"""
-        domain_data = defaultdict(lambda: {
+        domain_data: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
             'source_links': [],
             'extraction_methods': set(),
             'count': 0
@@ -363,9 +363,10 @@ class EnhancedDomainExtractor:
         for link in links:
             domain = self._extract_domain_from_url(link.url)
             if domain and self._is_valid_domain(domain):
-                domain_data[domain]['source_links'].append(link.url)
-                domain_data[domain]['extraction_methods'].add(link.link_type)
-                domain_data[domain]['count'] += 1
+                data = domain_data[domain]
+                data['source_links'].append(link.url)
+                data['extraction_methods'].add(link.link_type)
+                data['count'] += 1
         
         # 转换为ExtractedDomain对象
         extracted_domains = []
@@ -373,12 +374,17 @@ class EnhancedDomainExtractor:
             domain_type = self._classify_domain(domain)
             confidence_score = self._calculate_confidence_score(domain, data)
             
+            # 确保类型安全
+            source_links = data['source_links'][:10] if isinstance(data['source_links'], list) else []
+            discovery_count = data['count'] if isinstance(data['count'], int) else 0
+            extraction_methods = data['extraction_methods'] if isinstance(data['extraction_methods'], set) else set()
+            
             extracted_domain = ExtractedDomain(
                 domain=domain,
                 domain_type=domain_type,
-                source_links=data['source_links'][:10],  # 限制源链接数量
-                discovery_count=data['count'],
-                extraction_methods=data['extraction_methods'],
+                source_links=source_links,
+                discovery_count=discovery_count,
+                extraction_methods=extraction_methods,
                 confidence_score=confidence_score
             )
             

@@ -218,24 +218,25 @@ class ScanTaskExecutor:
                         # 转换为子域名格式
                         from app.engines.subdomain_discovery import SubdomainResult
                         subdomain_result = SubdomainResult(
-                            subdomain=domain_record.domain,
-                            discovery_method=domain_record.discovery_method,
-                            is_accessible=domain_record.is_accessible,
-                            ip_address=domain_record.ip_address,
-                            response_code=domain_record.response_code,
-                            response_time=domain_record.response_time
+                            subdomain=str(domain_record.domain),
+                            method=str(domain_record.discovery_method),
+                            ip_address=str(domain_record.ip_address) if domain_record.ip_address is not None else None
                         )
+                        # 设置其他属性
+                        subdomain_result.is_accessible = bool(domain_record.is_accessible)
+                        subdomain_result.response_code = int(domain_record.response_code) if domain_record.response_code is not None else None  # type: ignore
+                        subdomain_result.response_time = float(domain_record.response_time) if domain_record.response_time is not None else None  # type: ignore
                         result.subdomains.append(subdomain_result)
                     
-                    elif domain_record.category == DomainCategory.THIRD_PARTY:
+                    elif str(domain_record.category) == DomainCategory.THIRD_PARTY:
                         # 转换为第三方域名格式
                         from app.engines.third_party_identifier import ThirdPartyDomainResult
                         third_party_result = ThirdPartyDomainResult(
-                            domain=domain_record.domain,
+                            domain=str(domain_record.domain),
                             domain_type="third_party",
-                            risk_level=domain_record.risk_level,
-                            found_on_urls=domain_record.found_on_urls or [],
-                            confidence_score=domain_record.confidence_score,
+                            risk_level=str(domain_record.risk_level),
+                            found_on_urls=list(domain_record.found_on_urls) if domain_record.found_on_urls is not None else [],  # type: ignore
+                            confidence_score=float(domain_record.confidence_score) if domain_record.confidence_score is not None else 0.0,  # type: ignore
                             description=f"从循环发现中识别的第三方域名: {domain_record.domain}",
                             category_tags=["continuous_discovery", "third_party"]
                         )
@@ -463,11 +464,11 @@ class ScanTaskExecutor:
     
     def _is_target_domain_or_subdomain_advanced(self, domain: str, target_domain: str) -> bool:
         """强化的子域名检查方法，使用多种验证逻辑"""
+        domain_lower = domain.lower().strip()
+        target_domain_lower = target_domain.lower().strip()
+        
         try:
             import tldextract
-            
-            domain_lower = domain.lower().strip()
-            target_domain_lower = target_domain.lower().strip()
             
             # 完全相同
             if domain_lower == target_domain_lower:

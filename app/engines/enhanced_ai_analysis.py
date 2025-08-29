@@ -1,20 +1,19 @@
 import asyncio
 import time
 import json
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
 from app.core.logging import TaskLogger
 from app.engines.ai_analysis import AIAnalysisEngine, AIAnalysisResult
-from app.engines.smart_ai_prefilter import SmartAIPrefilter
 from app.engines.content_capture import ContentResult
 from app.models.task import ViolationRecord, RiskLevel
 from app.models.user import UserAIConfig
 
 
 class EnhancedAIAnalysisEngine:
-    """增强的AI分析引擎（集成智能预筛选）"""
+    """增强的AI分析引擎（直接AI分析）"""
     
     def __init__(self, task_id: str, user_id: str):
         self.task_id = task_id
@@ -22,18 +21,14 @@ class EnhancedAIAnalysisEngine:
         self.logger = TaskLogger(task_id, user_id)
         
         # 核心组件
-        self.prefilter = SmartAIPrefilter(task_id, user_id)
         self.ai_engine = None  # 延迟初始化
         
         # 性能统计
         self.performance_stats = {
             'total_processed': 0,
             'ai_calls_made': 0,
-            'ai_calls_skipped': 0,
             'total_violations_found': 0,
-            'avg_processing_time': 0.0,
-            'cost_saved_estimate': 0.0,
-            'cache_hit_rate': 0.0
+            'avg_processing_time': 0.0
         }
         
         # 批处理配置
@@ -74,10 +69,10 @@ class EnhancedAIAnalysisEngine:
         """处理单个批次"""
         violations = []
         
-        # 第一阶段：智能预筛选
+        # 直接进行AI分析
         analysis_tasks = []
         for content_result in batch:
-            analysis_tasks.append(self._analyze_single_content_smart(content_result, config))
+            analysis_tasks.append(self._analyze_single_content(content_result, config))
         
         # 限制并发AI调用数量
         semaphore = asyncio.Semaphore(self.max_concurrent_ai_calls)
@@ -101,41 +96,37 @@ class EnhancedAIAnalysisEngine:
         
         return violations
     
-    async def _analyze_single_content_smart(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
-        """智能分析单个内容"""
+    async def _analyze_single_content(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
+        """分析单个内容"""
         violations = []
         
         try:
-            # 步骤1：智能预筛选
-            needs_ai, reason, analysis_details = await self.prefilter.should_analyze_with_ai(content_result)
-            
-            self.performance_stats['total_processed'] += 1
-            
-            if not needs_ai:
-                # 跳过AI分析，记录原因
-                self.performance_stats['ai_calls_skipped'] += 1
-                self.logger.debug(f"跳过AI分析 {content_result.url}: {reason}")
-                
-                # 如果预筛选发现明显的低风险特征，创建一个低风险记录
-                if self._should_create_low_risk_record(reason, analysis_details):
-                    violation = self._create_low_risk_violation_record(content_result, reason, analysis_details)
-                    violations.append(violation)
-                
+            # 检查是否有有效的截图文件
+            if not content_result.screenshot_path or not Path(content_result.screenshot_path).exists():
+                self.logger.debug(f"跳过分析（无截图）: {content_result.url}")
                 return violations
             
-            # 步骤2：执行完整AI分析
+            # 检查文件大小
+            file_size = Path(content_result.screenshot_path).stat().st_size
+            if file_size < 1024:  # 小于1KB
+                self.logger.debug(f"跳过分析（截图太小）: {content_result.url}")
+                return violations
+            
+            # 直接执行AI分析
+            self.performance_stats['total_processed'] += 1
             self.performance_stats['ai_calls_made'] += 1
-            ai_violations = await self._perform_full_ai_analysis(content_result, config, reason, analysis_details)
+            
+            ai_violations = await self._perform_ai_analysis(content_result, config)
             violations.extend(ai_violations)
             
             return violations
             
         except Exception as e:
-            self.logger.error(f"智能内容分析失败 {content_result.url}: {e}")
+            self.logger.error(f"内容分析失败 {content_result.url}: {e}")
             return []
     
-    async def _perform_full_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any], trigger_reason: str, prefilter_details: Dict[str, Any]) -> List[ViolationRecord]:
-        """执行完整的AI分析"""
+    async def _perform_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
+        """执行AI分析"""
         violations = []
         
         try:
@@ -147,32 +138,29 @@ class EnhancedAIAnalysisEngine:
                 self.logger.warning("AI引擎初始化失败，无法进行分析")
                 return violations
             
-            # 由于 AIAnalysisEngine 没有 analyze_single_content 方法，
-            # 我们需要创建一个适配器方法来处理 ContentResult
+            # 适配 ContentResult 到 AI 分析流程
             ai_violations = await self._adapt_content_to_ai_analysis(content_result)
             
-            # 增强违规记录信息
+            # 添加元数据到违规记录
             for violation in ai_violations:
-                # 添加预筛选信息到违规记录
-                if hasattr(violation, 'metadata') and violation.metadata:
-                    metadata = json.loads(violation.metadata)
-                else:
-                    metadata = {}
-                
-                metadata.update({
-                    'prefilter_trigger': trigger_reason,
-                    'prefilter_details': prefilter_details,
-                    'analysis_method': 'full_ai_with_prefilter',
+                metadata = {
+                    'analysis_method': 'direct_ai_analysis',
                     'processing_timestamp': datetime.utcnow().isoformat()
-                })
+                }
                 
-                violation.metadata = json.dumps(metadata)
+                if hasattr(violation, 'metadata') and violation.metadata:
+                    existing_metadata = json.loads(violation.metadata)
+                    existing_metadata.update(metadata)
+                    violation.metadata = json.dumps(existing_metadata)
+                else:
+                    violation.metadata = json.dumps(metadata)
+                
                 violations.append(violation)
             
             self.performance_stats['total_violations_found'] += len(violations)
             
         except Exception as e:
-            self.logger.error(f"完整AI分析失败: {e}")
+            self.logger.error(f"AI分析失败: {e}")
         
         return violations
     
@@ -229,48 +217,10 @@ class EnhancedAIAnalysisEngine:
         
         # 添加元数据
         metadata = {
-            'analysis_method': 'full_ai_with_prefilter',
+            'analysis_method': 'direct_ai_analysis',
             'ai_analysis_duration': getattr(ai_result, 'analysis_duration', 0),
             'content_type': getattr(content_result, 'content_type', 'unknown'),
             'processing_timestamp': datetime.utcnow().isoformat()
-        }
-        violation.metadata = json.dumps(metadata)
-        
-        return violation
-    
-    def _should_create_low_risk_record(self, reason: str, analysis_details: Dict[str, Any]) -> bool:
-        """判断是否应该创建低风险记录"""
-        # 对于某些特定的跳过原因，我们仍然创建一个记录以便追踪
-        create_record_reasons = [
-            'low_score',
-            'below_threshold',
-            'random_skip'
-        ]
-        
-        return any(create_reason in reason for create_reason in create_record_reasons)
-    
-    def _create_low_risk_violation_record(self, content_result: ContentResult, reason: str, analysis_details: Dict[str, Any]) -> ViolationRecord:
-        """创建低风险违规记录"""
-        violation = ViolationRecord()
-        setattr(violation, 'task_id', self.task_id)
-        setattr(violation, 'url', content_result.url)
-        setattr(violation, 'domain', content_result.domain)
-        setattr(violation, 'violation_type', "low_risk_content")
-        setattr(violation, 'risk_level', RiskLevel.LOW)
-        setattr(violation, 'confidence_score', 0.1)  # 低置信度
-        setattr(violation, 'title', "低风险内容")
-        setattr(violation, 'description', f"通过智能预筛选识别为低风险内容: {reason}")
-        setattr(violation, 'evidence', json.dumps(analysis_details))
-        setattr(violation, 'ai_model_used', "prefilter_only")
-        setattr(violation, 'screenshot_path', content_result.screenshot_path)
-        setattr(violation, 'detected_at', datetime.utcnow())
-        
-        # 添加元数据
-        metadata = {
-            'analysis_method': 'prefilter_only',
-            'skip_reason': reason,
-            'prefilter_details': analysis_details,
-            'cost_saved': True
         }
         violation.metadata = json.dumps(metadata)
         
@@ -326,45 +276,24 @@ class EnhancedAIAnalysisEngine:
         self.performance_stats['avg_processing_time'] = (
             self.performance_stats['avg_processing_time'] + duration
         ) / 2 if self.performance_stats['avg_processing_time'] > 0 else duration
-        
-        # 估算节省的成本（基于跳过的AI调用）
-        # 假设每次GPT-4V调用成本约$0.01
-        cost_per_call = 0.01
-        self.performance_stats['cost_saved_estimate'] += (
-            self.performance_stats['ai_calls_skipped'] * cost_per_call
-        )
-        
-        # 获取预筛选器的缓存命中率
-        prefilter_stats = self.prefilter.get_efficiency_stats()
-        if 'cache_hit_rate' in prefilter_stats:
-            self.performance_stats['cache_hit_rate'] = float(
-                prefilter_stats['cache_hit_rate'].replace('%', '')
-            ) / 100
     
     def get_performance_report(self) -> Dict[str, Any]:
         """获取性能报告"""
-        prefilter_stats = self.prefilter.get_efficiency_stats()
-        
         return {
             'analysis_performance': self.performance_stats.copy(),
-            'prefilter_efficiency': prefilter_stats,
             'optimization_metrics': {
-                'ai_skip_rate': f"{(self.performance_stats['ai_calls_skipped'] / max(self.performance_stats['total_processed'], 1) * 100):.1f}%",
                 'violations_per_ai_call': self.performance_stats['total_violations_found'] / max(self.performance_stats['ai_calls_made'], 1),
-                'estimated_cost_savings': f"${self.performance_stats['cost_saved_estimate']:.3f}",
                 'avg_processing_time': f"{self.performance_stats['avg_processing_time']:.2f}s"
             }
         }
     
     async def analyze_single_content(self, content_result: ContentResult) -> List[ViolationRecord]:
         """分析单个内容（兼容性方法）"""
-        return await self._analyze_single_content_smart(content_result, {})
+        return await self._analyze_single_content(content_result, {})
     
     async def cleanup(self):
         """清理资源"""
         try:
-            await self.prefilter.clear_cache()
-            # AIAnalysisEngine 没有 cleanup 方法，只清理预筛选器
             self.logger.info("增强AI分析引擎清理完成")
         except Exception as e:
             self.logger.warning(f"清理过程中出现异常: {e}")

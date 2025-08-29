@@ -154,7 +154,7 @@ class EnhancedSubdomainDiscovery:
                         self.logger.warning(f"爬取 {subdomain} 失败: {result}")
                         continue
                     
-                    if result:
+                    if result and isinstance(result, tuple) and len(result) == 2:
                         discovered_domains, third_party_found = result
                         
                         # 处理新发现的子域名
@@ -190,6 +190,7 @@ class EnhancedSubdomainDiscovery:
             ) as session:
                 
                 # 尝试访问HTTPS，失败则尝试HTTP
+                test_url = f"https://{subdomain}"  # 默认URL
                 for protocol in ['https', 'http']:
                     try:
                         test_url = f"{protocol}://{subdomain}"

@@ -47,9 +47,10 @@
             <el-radio value="quick">快速扫描</el-radio>
             <el-radio value="standard">标准扫描</el-radio>
             <el-radio value="deep">深度扫描</el-radio>
+            <el-radio value="infinite">无限爬取</el-radio>
           </el-radio-group>
           <div class="form-tip">
-            快速：仅扫描主域名 | 标准：包含子域名发现 | 深度：全面扫描所有功能
+            快速：仅扫描主域名 | 标准：包含子域名发现 | 深度：全面扫描所有功能 | 无限：循环发现直到无新链接
           </div>
         </el-form-item>
         
@@ -76,15 +77,33 @@
         <!-- 高级配置 -->
         <el-divider content-position="left">高级配置</el-divider>
         
+        <div v-if="taskForm.scanMode === 'infinite'" class="infinite-mode-notice">
+          <el-alert
+            title="无限爬取模式已启用"
+            type="warning"
+            :closable="false"
+            show-icon
+          >
+            <template #default>
+              🔄 在无限爬取模式下，系统将循环发现域名直到找不到新链接为止。<br>
+              下方的数量限制将被忽略，系统将自动优化性能参数。
+            </template>
+          </el-alert>
+        </div>
+        
         <el-row :gutter="20">
           <el-col :span="8">
             <el-form-item label="最大子域名">
               <el-input-number
                 v-model="taskForm.maxSubdomains"
-                :min="1"
-                :max="1000"
+                :min="taskForm.scanMode === 'infinite' ? 0 : 1"
+                :max="taskForm.scanMode === 'infinite' ? 0 : 1000"
+                :disabled="taskForm.scanMode === 'infinite'"
                 style="width: 100%"
               />
+              <div v-if="taskForm.scanMode === 'infinite'" class="form-tip">
+                无限模式：不限制子域名数量
+              </div>
             </el-form-item>
           </el-col>
           
@@ -92,10 +111,14 @@
             <el-form-item label="爬取深度">
               <el-input-number
                 v-model="taskForm.crawlDepth"
-                :min="1"
-                :max="10"
+                :min="taskForm.scanMode === 'infinite' ? 0 : 1"
+                :max="taskForm.scanMode === 'infinite' ? 0 : 10"
+                :disabled="taskForm.scanMode === 'infinite'"
                 style="width: 100%"
               />
+              <div v-if="taskForm.scanMode === 'infinite'" class="form-tip">
+                无限模式：不限制爬取深度
+              </div>
             </el-form-item>
           </el-col>
           
@@ -103,10 +126,14 @@
             <el-form-item label="页面限制">
               <el-input-number
                 v-model="taskForm.maxPages"
-                :min="1"
-                :max="10000"
+                :min="taskForm.scanMode === 'infinite' ? 0 : 1"
+                :max="taskForm.scanMode === 'infinite' ? 0 : 10000"
+                :disabled="taskForm.scanMode === 'infinite'"
                 style="width: 100%"
               />
+              <div v-if="taskForm.scanMode === 'infinite'" class="form-tip">
+                无限模式：不限制页面数量
+              </div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -148,14 +175,6 @@
           </div>
         </el-form-item>
         
-        <el-form-item label="智能AI预筛选">
-          <el-switch v-model="taskForm.smartPrefilterEnabled" />
-          <span class="form-label">启用AI调用优化</span>
-          <div class="form-tip">
-            💰 可减少70-90%的AI调用，大幅降低成本同时提升速度
-          </div>
-        </el-form-item>
-        
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="DNS并发数">
@@ -173,21 +192,7 @@
           </el-col>
           
           <el-col :span="12">
-            <el-form-item label="AI预筛选阈值">
-              <el-slider
-                v-model="taskForm.aiSkipThreshold"
-                :min="0.1"
-                :max="0.8"
-                :step="0.1"
-                show-input
-                input-size="small"
-                :format-tooltip="(val) => `${(val * 100).toFixed(0)}%`"
-                style="width: 100%"
-              />
-              <div class="form-tip">
-                阈值越低，AI跳过率越高，成本越低
-              </div>
-            </el-form-item>
+            <!-- 空白占位符 -->
           </el-col>
         </el-row>
         
@@ -249,12 +254,10 @@ const taskForm = reactive({
   requestDelay: 1000,
   timeout: 30,
   // 性能优化配置
-  useParallelExecutor: true,      // 默认启用并行执行器
-  smartPrefilterEnabled: false,   // 禁用智能预筛选以确保全部分析
-  dnsConcurrency: 100,            // DNS并发数
-  aiSkipThreshold: 0.0,           // 设置为0确保不跳过任何AI分析
-  multiViewportCapture: false,    // 多视角截图
-  enableAggressiveCaching: false  // 激进缓存
+  useParallelExecutor: true,          // 默认启用并行执行器
+  dnsConcurrency: 100,                // DNS并发数
+  multiViewportCapture: false,        // 多视角截图
+  enableAggressiveCaching: false      // 激进缓存
 })
 
 // 表单验证规则
@@ -283,9 +286,8 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 1
       taskForm.crawlDepth = 1
       taskForm.maxPages = 50
-      // 快速模式优化配置（确保全部分析）
+      // 快速模式优化配置
       taskForm.dnsConcurrency = 50
-      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = false
       break
     case 'standard':
@@ -296,9 +298,8 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 100
       taskForm.crawlDepth = 3
       taskForm.maxPages = 1000
-      // 标准模式优化配置（确保全部分析）
+      // 标准模式优化配置
       taskForm.dnsConcurrency = 100
-      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = false
       break
     case 'deep':
@@ -309,10 +310,24 @@ watch(() => taskForm.scanMode, (newMode) => {
       taskForm.maxSubdomains = 500
       taskForm.crawlDepth = 5
       taskForm.maxPages = 5000
-      // 深度模式优化配置（确保全部分析）
+      // 深度模式优化配置
       taskForm.dnsConcurrency = 150
-      taskForm.aiSkipThreshold = 0.0  // 不跳过任何AI分析
       taskForm.multiViewportCapture = true
+      break
+    case 'infinite':
+      // 无限爬取模式 - 循环发现直到无新链接
+      taskForm.enableSubdomain = true
+      taskForm.enableCrawling = true
+      taskForm.enableCapture = true
+      taskForm.enableAI = true
+      taskForm.maxSubdomains = 0  // 0表示无限制
+      taskForm.crawlDepth = 0     // 0表示无限制
+      taskForm.maxPages = 0       // 0表示无限制
+      // 无限模式优化配置
+      taskForm.dnsConcurrency = 200
+      taskForm.multiViewportCapture = true
+      taskForm.useParallelExecutor = true  // 强制启用并行执行器
+      taskForm.enableAggressiveCaching = true  // 启用激进缓存提高效率
       break
   }
 })
@@ -338,16 +353,18 @@ const handleSubmit = async () => {
         third_party_identification_enabled: true, // 始终启用第三方识别
         content_capture_enabled: taskForm.enableCapture,
         ai_analysis_enabled: taskForm.enableAI,
-        max_subdomains: taskForm.maxSubdomains,
-        max_crawl_depth: taskForm.crawlDepth,
-        max_pages_per_domain: taskForm.maxPages,
+        
+        // 根据扫描模式设置限制参数
+        max_subdomains: taskForm.scanMode === 'infinite' ? 0 : taskForm.maxSubdomains,
+        max_crawl_depth: taskForm.scanMode === 'infinite' ? 0 : taskForm.crawlDepth,
+        max_pages_per_domain: taskForm.scanMode === 'infinite' ? 0 : taskForm.maxPages,
+        
         request_delay: taskForm.requestDelay,
         timeout: taskForm.timeout,
+        
         // 性能优化配置
         use_parallel_executor: taskForm.useParallelExecutor,
-        smart_prefilter_enabled: taskForm.smartPrefilterEnabled,
         dns_concurrency: taskForm.dnsConcurrency,
-        ai_skip_threshold: taskForm.aiSkipThreshold,
         multi_viewport_capture: taskForm.multiViewportCapture,
         enable_aggressive_caching: taskForm.enableAggressiveCaching,
         
@@ -357,7 +374,10 @@ const handleSubmit = async () => {
         max_concurrent_ai_calls: 3,
         batch_size: 10,
         screenshot_optimization: true,
-        max_crawl_iterations: 5
+        
+        // 无限爬取模式特殊配置
+        max_crawl_iterations: taskForm.scanMode === 'infinite' ? 0 : 5,  // 0表示无限循环
+        enable_infinite_discovery: taskForm.scanMode === 'infinite'     // 启用无限发现
       }
     }
     
@@ -404,6 +424,14 @@ const handleReset = () => {
   margin: 0;
   color: #666;
   font-size: 14px;
+}
+
+.infinite-mode-notice {
+  margin-bottom: 20px;
+}
+
+.infinite-mode-notice :deep(.el-alert__content) {
+  line-height: 1.6;
 }
 
 .form-tip {

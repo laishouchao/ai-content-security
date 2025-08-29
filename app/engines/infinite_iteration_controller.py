@@ -30,6 +30,7 @@ try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
+    psutil = None
     PSUTIL_AVAILABLE = False
 
 from app.core.logging import TaskLogger
@@ -173,21 +174,23 @@ class InfiniteIterationController:
     def record_performance_metrics(self):
         """记录性能指标"""
         try:
-            if PSUTIL_AVAILABLE:
+            if PSUTIL_AVAILABLE and psutil is not None:
                 # 获取系统性能指标
                 memory_info = psutil.virtual_memory()
                 memory_usage_mb = memory_info.used / 1024 / 1024
                 cpu_usage = psutil.cpu_percent(interval=0.1)
+                memory_percent = memory_info.percent
             else:
                 # 使用基本的内存监控
                 import sys
                 memory_usage_mb = sys.getsizeof(self) / 1024 / 1024  # 粗略估计
                 cpu_usage = 0.0  # 无法获取CPU使用率
+                memory_percent = memory_usage_mb / 1024  # 粗略估计
             
             performance_data = {
                 'memory_usage_mb': memory_usage_mb,
                 'cpu_usage_percent': cpu_usage,
-                'memory_percent': memory_usage_mb / 1024 if not PSUTIL_AVAILABLE else memory_info.percent
+                'memory_percent': memory_percent
             }
             
             self.performance_history.append(performance_data)
@@ -283,12 +286,12 @@ class InfiniteIterationController:
             return False
         
         # 5. 内存限制
-        if PSUTIL_AVAILABLE and self.iteration_metrics and self.iteration_metrics[-1].memory_usage_mb > self.stopping_condition.memory_limit_mb:
+        if PSUTIL_AVAILABLE and psutil is not None and self.iteration_metrics and self.iteration_metrics[-1].memory_usage_mb > self.stopping_condition.memory_limit_mb:
             self.logger.warning(f"内存使用超出限制: {self.iteration_metrics[-1].memory_usage_mb:.2f} MB")
             # 尝试垃圾回收
             gc.collect()
             # 如果仍然超出限制，停止迭代
-            if PSUTIL_AVAILABLE:
+            if PSUTIL_AVAILABLE and psutil is not None:
                 current_memory = psutil.virtual_memory().used / 1024 / 1024
                 if current_memory > self.stopping_condition.memory_limit_mb:
                     return False

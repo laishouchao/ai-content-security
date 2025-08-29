@@ -85,6 +85,7 @@ class ScanTask(Base):
     total_subdomains = Column(Integer, default=0, nullable=False)
     total_pages_crawled = Column(Integer, default=0, nullable=False)
     total_third_party_domains = Column(Integer, default=0, nullable=False)
+    total_domain_records = Column(Integer, default=0, nullable=False)  # 新的统一域名记录统计
     total_violations = Column(Integer, default=0, nullable=False)
     
     # 风险统计

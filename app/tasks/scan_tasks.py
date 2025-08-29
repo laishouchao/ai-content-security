@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.logging import TaskLogger
 from app.core.database import AsyncSessionLocal
 from app.models.domain import DomainRecord
+from app.models.task import ScanTask, TaskLog, TaskStatus
 from app.engines.scan_executor import ScanTaskExecutor, ScanExecutionResult
 from app.engines.parallel_scan_executor import ParallelScanExecutor
 from app.websocket.handlers import task_monitor, TaskMonitorHandler

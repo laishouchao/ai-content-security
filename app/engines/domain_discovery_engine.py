@@ -8,7 +8,7 @@ import time
 from typing import Dict, List, Set, Optional, Any
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import tldextract
 
 from app.core.logging import TaskLogger
@@ -28,11 +28,9 @@ class DiscoveryRound:
     new_domains_found: int = 0
     pages_crawled: int = 0
     total_links_found: int = 0
-    errors: List[str] = None
+    errors: List[str] = field(default_factory=list)
     
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
+
 
 
 class ContinuousDomainDiscoveryEngine:
@@ -237,30 +235,34 @@ class ContinuousDomainDiscoveryEngine:
         
         for domain_record in domains:
             try:
+                # 获取域名字符串
+                domain_str = str(domain_record.domain)
+                
                 # 构建要爬取的URL
                 urls_to_crawl = [
-                    f"https://{domain_record.domain}",
-                    f"http://{domain_record.domain}"
+                    f"https://{domain_str}",
+                    f"http://{domain_str}"
                 ]
                 
-                self.logger.debug(f"🕷️ 开始爬取域名: {domain_record.domain}")
+                self.logger.debug(f"🕷️ 开始爬取域名: {domain_str}")
                 
                 # 执行爬取
                 crawl_results = await self.crawler_engine.crawl_domain(
-                    domain_record.domain, 
+                    domain_str, 
                     urls_to_crawl, 
                     config
                 )
                 
                 all_crawl_results.extend(crawl_results)
                 
-                self.logger.debug(f"✅ 域名爬取完成: {domain_record.domain}, 页面数={len(crawl_results)}")
+                self.logger.debug(f"✅ 域名爬取完成: {domain_str}, 页面数={len(crawl_results)}")
                 
                 # 短暂休息避免过度请求
                 await asyncio.sleep(0.2)
                 
             except Exception as e:
-                self.logger.warning(f"爬取域名失败 {domain_record.domain}: {e}")
+                domain_str = str(domain_record.domain)
+                self.logger.warning(f"爬取域名失败 {domain_str}: {e}")
                 continue
         
         return all_crawl_results
@@ -413,6 +415,9 @@ class ContinuousDomainDiscoveryEngine:
         try:
             async with AsyncSessionLocal() as db:
                 for domain_record in domains:
+                    # 获取现有的extra_data，确保是字典类型
+                    existing_extra_data = domain_record.extra_data if isinstance(domain_record.extra_data, dict) else {}
+                    
                     # 更新域名状态为已爬取
                     update_query = update(DomainRecord).where(
                         DomainRecord.id == domain_record.id
@@ -420,7 +425,7 @@ class ContinuousDomainDiscoveryEngine:
                         status=DomainStatus.ACCESSIBLE,
                         last_accessed_at=datetime.utcnow(),
                         extra_data={
-                            **((domain_record.extra_data or {})),
+                            **existing_extra_data,
                             "crawled": True,
                             "crawled_at": datetime.utcnow().isoformat(),
                             "crawled_in_round": self.current_round

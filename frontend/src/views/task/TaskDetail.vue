@@ -382,7 +382,11 @@ let autoRefreshTimer: number | null = null
 // 统计数据
 const domainStats = ref({
   total_domains: 0,
+  target_domains: 0,
+  subdomain_count: 0,
+  third_party_count: 0,
   accessible_count: 0,
+  analyzed_count: 0,
   violation_count: 0
 })
 
@@ -678,11 +682,11 @@ const fetchAllDomains = async () => {
 // 获取统计数据
 const fetchDomainStats = async () => {
   try {
-    const response = await fetch(`/api/v1/tasks/${taskId}/domain-stats`)
-    if (response.ok) {
-      const data = await response.json()
-      if (data.success) {
-        domainStats.value = data.data
+    const response = await taskAPI.getDomainStats(taskId as string)
+    if (response.data.success && response.data.data) {
+      domainStats.value = {
+        ...domainStats.value,
+        ...response.data.data
       }
     }
   } catch (error) {

@@ -53,9 +53,7 @@ export interface TaskConfig {
   
   // 性能优化配置
   use_parallel_executor?: boolean
-  smart_prefilter_enabled?: boolean
   dns_concurrency?: number
-  ai_skip_threshold?: number
   multi_viewport_capture?: boolean
   enable_aggressive_caching?: boolean
   
@@ -66,6 +64,9 @@ export interface TaskConfig {
   batch_size?: number
   screenshot_optimization?: boolean
   max_crawl_iterations?: number
+  
+  // 无限爬取模式配置
+  enable_infinite_discovery?: boolean
 }
 
 export interface PerformanceMetrics {
@@ -201,6 +202,19 @@ class TaskAPI {
     return http.get(`/tasks/${taskId}/domains`, { params })
   }
   
+  // 获取域名统计信息
+  async getDomainStats(taskId: string): Promise<AxiosResponse<ApiResponse<{
+    total_domains: number
+    target_domains: number
+    subdomain_count: number
+    third_party_count: number
+    accessible_count: number
+    analyzed_count: number
+    violation_count: number
+  }>>> {
+    return http.get(`/tasks/${taskId}/domain-stats`)
+  }
+  
   // 获取任务统计
   async getTaskStats(): Promise<AxiosResponse<ApiResponse<{
     total_tasks: number
@@ -233,7 +247,6 @@ class TaskAPI {
     efficiency_score: string
     performance_optimizations: {
       parallel_executor_enabled: boolean
-      smart_prefilter_enabled: boolean
       dns_concurrency: number
     }
   }>>> {

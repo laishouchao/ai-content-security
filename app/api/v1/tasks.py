@@ -100,9 +100,7 @@ async def create_scan_task(
         # 确保性能优化配置默认值
         performance_defaults = {
             'use_parallel_executor': True,
-            'smart_prefilter_enabled': True,
             'dns_concurrency': 100,
-            'ai_skip_threshold': 0.0,  # 不跳过任何AI分析
             'multi_viewport_capture': False
         }
         
@@ -483,9 +481,7 @@ async def get_config_presets(
                     request_delay=1000,
                     timeout=30,
                     use_parallel_executor=True,
-                    smart_prefilter_enabled=True,
                     dns_concurrency=100,
-                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=3,
                     multi_viewport_capture=False,
                     enable_aggressive_caching=False,
@@ -493,7 +489,8 @@ async def get_config_presets(
                     passive_dns_enabled=False,
                     max_concurrent_ai_calls=3,
                     batch_size=10,
-                    screenshot_optimization=True
+                    screenshot_optimization=True,
+                    enable_infinite_discovery=False
                 )
             ),
             TaskConfigPresetSchema(
@@ -511,9 +508,7 @@ async def get_config_presets(
                     request_delay=1000,
                     timeout=30,
                     use_parallel_executor=True,
-                    smart_prefilter_enabled=True,
                     dns_concurrency=100,
-                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=5,
                     multi_viewport_capture=True,
                     enable_aggressive_caching=False,
@@ -521,7 +516,8 @@ async def get_config_presets(
                     passive_dns_enabled=False,
                     max_concurrent_ai_calls=3,
                     batch_size=10,
-                    screenshot_optimization=True
+                    screenshot_optimization=True,
+                    enable_infinite_discovery=False
                 )
             ),
             TaskConfigPresetSchema(
@@ -539,9 +535,7 @@ async def get_config_presets(
                     request_delay=1000,
                     timeout=30,
                     use_parallel_executor=True,
-                    smart_prefilter_enabled=True,
                     dns_concurrency=150,
-                    ai_skip_threshold=0.0,  # 不跳过任何AI分析
                     max_crawl_iterations=8,
                     multi_viewport_capture=True,
                     enable_aggressive_caching=False,
@@ -549,35 +543,8 @@ async def get_config_presets(
                     passive_dns_enabled=True,
                     max_concurrent_ai_calls=5,
                     batch_size=15,
-                    screenshot_optimization=True
-                )
-            ),
-            TaskConfigPresetSchema(
-                name="成本优化",
-                description="最大化节省AI调用成本的配置，适合大批量扫描",
-                config=TaskConfigSchema(
-                    subdomain_discovery_enabled=True,
-                    link_crawling_enabled=True,
-                    third_party_identification_enabled=True,
-                    content_capture_enabled=True,
-                    ai_analysis_enabled=True,
-                    max_subdomains=300,
-                    max_crawl_depth=2,
-                    max_pages_per_domain=1000,
-                    request_delay=1000,
-                    timeout=30,
-                    use_parallel_executor=True,
-                    smart_prefilter_enabled=True,
-                    dns_concurrency=100,
-                    ai_skip_threshold=0.0,  # 用户要求全部进行扫描，不跳过AI分析
-                    max_crawl_iterations=4,
-                    multi_viewport_capture=False,
-                    enable_aggressive_caching=True,
-                    certificate_discovery_enabled=False,
-                    passive_dns_enabled=False,
-                    max_concurrent_ai_calls=2,
-                    batch_size=20,
-                    screenshot_optimization=False
+                    screenshot_optimization=True,
+                    enable_infinite_discovery=False
                 )
             )
         ]
@@ -652,7 +619,6 @@ async def get_task_performance_metrics(
                 "efficiency_score": f"{metrics.efficiency_score:.1f}",
                 "performance_optimizations": {
                     "parallel_executor_enabled": config.get('use_parallel_executor', False),
-                    "smart_prefilter_enabled": config.get('smart_prefilter_enabled', False),
                     "dns_concurrency": config.get('dns_concurrency', 50)
                 }
             }

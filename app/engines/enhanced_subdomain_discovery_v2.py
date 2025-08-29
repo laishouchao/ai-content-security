@@ -154,8 +154,9 @@ class EnhancedDNSQueryMethod:
                 # 使用asyncio.to_thread来异步执行同步的DNS查询
                 answers = await asyncio.to_thread(self.resolver.resolve, domain, 'A')
                 
-                if answers:
-                    ip_addresses = [str(answer) for answer in answers]
+                if answers and answers.rrset:
+                    # 正确处理DNS Answer对象，获取其中的记录
+                    ip_addresses = [str(rdata) for rdata in answers.rrset]
                     response_time = time.time() - start_time
                     
                     result = EnhancedSubdomainResult(

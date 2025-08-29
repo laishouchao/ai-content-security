@@ -37,7 +37,7 @@ class ResourceInfo:
     created_at: datetime
     last_accessed: datetime
     size_bytes: int = 0
-    metadata: Dict[str, Any] = None
+    metadata: Optional[Dict[str, Any]] = None
     cleanup_callback: Optional[Callable] = None
 
 

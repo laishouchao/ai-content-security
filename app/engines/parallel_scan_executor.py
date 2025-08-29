@@ -401,7 +401,7 @@ class ParallelScanExecutor:
                     self.results['content_results'].extend(content_results)
                     self.logger.info(f"抓取到 {len(content_results)} 个内容结果")
                     
-                    # 智能AI分析（预筛选）
+                    # AI分析
                     for i, content_result in enumerate(content_results):
                         self.logger.info(f"🤖 正在处理内容 ({i+1}/{len(content_results)}): {content_result.url}")
                         
@@ -410,7 +410,7 @@ class ParallelScanExecutor:
                                          f"status_code={getattr(content_result, 'status_code', None)}")
                         
                         should_analyze, reason = await self._should_analyze_with_ai(content_result)
-                        self.logger.info(f"预筛选结果: should_analyze={should_analyze}, reason={reason}")
+                        self.logger.info(f"分析检查结果: should_analyze={should_analyze}, reason={reason}")
                         
                         if should_analyze:
                             ai_call_count += 1
@@ -527,8 +527,8 @@ class ParallelScanExecutor:
         )
     
     async def _should_analyze_with_ai(self, content_result: ContentResult) -> Tuple[bool, str]:
-        """判断是否需要AI分析（预筛选）"""
-        self.logger.debug(f"🔍 开始预筛选检查: {content_result.url}")
+        """判断是否需要AI分析"""
+        self.logger.debug(f"🔍 开始分析检查: {content_result.url}")
         
         # 检查截图文件
         if not content_result.screenshot_path:
@@ -554,27 +554,14 @@ class ParallelScanExecutor:
             self.logger.error(f"❌ 检查截图文件失败: {e}")
             return False, "screenshot_file_error"
         
-        # 检查URL模式
-        suspicious_patterns = [
-            'login', 'admin', 'auth', 'api', 'upload', 'download',
-            'casino', 'porn', 'adult', 'gambling', 'phishing'
-        ]
-        
-        url_lower = content_result.url.lower()
-        for pattern in suspicious_patterns:
-            if pattern in url_lower:
-                self.logger.info(f"✅ 发现可疑模式 '{pattern}': {content_result.url}")
-                return True, f"suspicious_pattern_{pattern}"
-        
         # 检查状态码
         if hasattr(content_result, 'status_code') and content_result.status_code is not None and content_result.status_code >= 400:
             self.logger.info(f"⚠️ 错误状态码: {content_result.status_code}")
             return False, "error_status_code"
         
-        # 移除随机采样逻辑，确保所有内容都进行AI分析
-        # 为了全面扫描，所有内容都应该被分析
-        self.logger.info(f"✅ 强制分析所有内容: {content_result.url}")
-        return True, "force_analysis"
+        # 对所有有效内容进行AI分析
+        self.logger.info(f"✅ 对所有内容进行AI分析: {content_result.url}")
+        return True, "analyze_all_content"
     
     async def _perform_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:
         """执行AI分析"""

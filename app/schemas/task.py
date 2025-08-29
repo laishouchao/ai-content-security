@@ -22,18 +22,16 @@ class TaskConfigSchema(BaseModel):
     content_capture_enabled: bool = Field(True, description="启用内容抓取")
     ai_analysis_enabled: bool = Field(True, description="启用AI分析")
     
-    # 基础限制
-    max_subdomains: int = Field(100, ge=1, le=1000, description="最大子域名数量")
-    max_crawl_depth: int = Field(3, ge=1, le=10, description="最大爬取深度")
-    max_pages_per_domain: int = Field(1000, ge=1, le=10000, description="每域名最大页面数")
+    # 基础限制 - 支持0值表示无限制
+    max_subdomains: int = Field(100, ge=0, le=1000, description="最大子域名数量，0表示无限制")
+    max_crawl_depth: int = Field(3, ge=0, le=10, description="最大爬取深度，0表示无限制")
+    max_pages_per_domain: int = Field(1000, ge=0, le=10000, description="每域名最大页面数，0表示无限制")
     request_delay: int = Field(1000, ge=100, le=5000, description="请求间隔(毫秒)")
     timeout: int = Field(30, ge=5, le=300, description="超时时间(秒)")
     
     # 性能优化配置
     use_parallel_executor: Optional[bool] = Field(True, description="使用并行执行器")
-    smart_prefilter_enabled: Optional[bool] = Field(True, description="启用智能AI预筛选")
     dns_concurrency: Optional[int] = Field(100, ge=10, le=200, description="DNS查询并发数")
-    ai_skip_threshold: Optional[float] = Field(0.0, ge=0.0, le=0.8, description="AI跳过阈值（0.0表示不跳过任何分析）")
     multi_viewport_capture: Optional[bool] = Field(False, description="多视角截图")
     enable_aggressive_caching: Optional[bool] = Field(False, description="激进缓存策略")
     
@@ -44,15 +42,11 @@ class TaskConfigSchema(BaseModel):
     batch_size: Optional[int] = Field(10, ge=1, le=50, description="批处理大小")
     screenshot_optimization: Optional[bool] = Field(True, description="截图优化")
     
-    # 迭代配置
-    max_crawl_iterations: Optional[int] = Field(5, ge=1, le=10, description="最大爬取迭代次数")
+    # 迭代配置 - 支持0值表示无限制
+    max_crawl_iterations: Optional[int] = Field(5, ge=0, le=10, description="最大爬取迭代次数，0表示无限制")
     
-    @validator('ai_skip_threshold')
-    def validate_ai_skip_threshold(cls, v):
-        """验证AI跳过阈值（允许0.0以实现不跳过任何分析）"""
-        if v is not None and not 0.0 <= v <= 0.8:
-            raise ValueError('AI跳过阈值必须在0.0到0.8之间（0.0表示不跳过任何分析）')
-        return v
+    # 无限爬取模式配置
+    enable_infinite_discovery: Optional[bool] = Field(False, description="启用无限发现模式")
     
     @validator('dns_concurrency')
     def validate_dns_concurrency(cls, v):
@@ -75,9 +69,7 @@ class TaskConfigSchema(BaseModel):
                 "request_delay": 1000,
                 "timeout": 30,
                 "use_parallel_executor": True,
-                "smart_prefilter_enabled": True,
                 "dns_concurrency": 100,
-                "ai_skip_threshold": 0.0,
                 "multi_viewport_capture": False,
                 "enable_aggressive_caching": False
             }
@@ -108,7 +100,6 @@ class CreateTaskSchema(BaseModel):
                 "description": "对example.com进行全面的安全扫描",
                 "config": {
                     "use_parallel_executor": True,
-                    "smart_prefilter_enabled": True,
                     "dns_concurrency": 100
                 }
             }
@@ -191,9 +182,7 @@ class TaskConfigPresetSchema(BaseModel):
                 "description": "适合日常安全检查的快速扫描配置",
                 "config": {
                     "use_parallel_executor": True,
-                    "smart_prefilter_enabled": True,
                     "dns_concurrency": 50,
-                    "ai_skip_threshold": 0.0,
                     "max_subdomains": 50,
                     "max_crawl_depth": 2
                 }
@@ -218,9 +207,7 @@ TASK_CONFIG_PRESETS = {
             request_delay=1000,
             timeout=30,
             use_parallel_executor=True,
-            smart_prefilter_enabled=True,
             dns_concurrency=50,
-            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=False,
             enable_aggressive_caching=True,
             certificate_discovery_enabled=True,
@@ -228,7 +215,8 @@ TASK_CONFIG_PRESETS = {
             max_concurrent_ai_calls=3,
             batch_size=10,
             screenshot_optimization=True,
-            max_crawl_iterations=5
+            max_crawl_iterations=5,
+            enable_infinite_discovery=False
         )
     ),
     
@@ -247,9 +235,7 @@ TASK_CONFIG_PRESETS = {
             request_delay=1000,
             timeout=30,
             use_parallel_executor=True,
-            smart_prefilter_enabled=True,
             dns_concurrency=100,
-            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=False,
             enable_aggressive_caching=False,
             certificate_discovery_enabled=True,
@@ -257,7 +243,8 @@ TASK_CONFIG_PRESETS = {
             max_concurrent_ai_calls=3,
             batch_size=10,
             screenshot_optimization=True,
-            max_crawl_iterations=5
+            max_crawl_iterations=5,
+            enable_infinite_discovery=False
         )
     ),
     
@@ -276,9 +263,7 @@ TASK_CONFIG_PRESETS = {
             request_delay=1000,
             timeout=30,
             use_parallel_executor=True,
-            smart_prefilter_enabled=True,
             dns_concurrency=150,
-            ai_skip_threshold=0.0,  # 不跳过任何AI分析
             multi_viewport_capture=True,
             enable_aggressive_caching=False,
             certificate_discovery_enabled=True,
@@ -286,36 +271,36 @@ TASK_CONFIG_PRESETS = {
             max_concurrent_ai_calls=3,
             batch_size=10,
             screenshot_optimization=True,
-            max_crawl_iterations=8
+            max_crawl_iterations=8,
+            enable_infinite_discovery=False
         )
     ),
     
-    "cost_optimized": TaskConfigPresetSchema(
-        name="成本优化",
-        description="最大化成本节省，适合大批量扫描",
+    "infinite": TaskConfigPresetSchema(
+        name="无限爬取",
+        description="循环发现直到无新链接，无时间限制",
         config=TaskConfigSchema(
             subdomain_discovery_enabled=True,
             link_crawling_enabled=True,
             third_party_identification_enabled=True,
             content_capture_enabled=True,
             ai_analysis_enabled=True,
-            max_subdomains=200,
-            max_crawl_depth=3,
-            max_pages_per_domain=1000,
+            max_subdomains=0,  # 无限制
+            max_crawl_depth=0,  # 无限制
+            max_pages_per_domain=0,  # 无限制
             request_delay=1000,
             timeout=30,
             use_parallel_executor=True,
-            smart_prefilter_enabled=True,
-            dns_concurrency=100,
-            ai_skip_threshold=0.0,  # 即使是成本优化也不跳过AI分析
-            multi_viewport_capture=False,
-            enable_aggressive_caching=True,
+            dns_concurrency=200,  # 最大并发数
+            multi_viewport_capture=True,
+            enable_aggressive_caching=True,  # 启用激进缓存提高效率
             certificate_discovery_enabled=True,
             passive_dns_enabled=False,
-            max_concurrent_ai_calls=2,  # 减少并发AI调用
-            batch_size=20,  # 更大的批处理
+            max_concurrent_ai_calls=3,
+            batch_size=10,
             screenshot_optimization=True,
-            max_crawl_iterations=5
+            max_crawl_iterations=0,  # 无限制
+            enable_infinite_discovery=True
         )
-    )
+    ),
 }

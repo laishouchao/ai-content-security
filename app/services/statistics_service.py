@@ -5,9 +5,9 @@ from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
 from app.models.task import (
-    ScanTask, TaskStatus, ViolationRecord, ViolationType, RiskLevel, 
-    ThirdPartyDomain
+    ScanTask, TaskStatus, ViolationRecord, ViolationType, RiskLevel
 )
+from app.models.domain import DomainRecord
 from app.models.user import User
 from app.core.logging import logger
 
