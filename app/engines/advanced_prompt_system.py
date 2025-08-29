@@ -61,28 +61,46 @@ class AdvancedPromptBuilder:
     def _load_system_prompts(self) -> Dict[str, str]:
         """加载系统提示词模板"""
         return {
-            "base": """你是一个专业的网络内容安全审查专家，专门识别和检测网站内容中的违法违规内容。
+            "base": """你是一个专业的网络内容安全审核专家，专门负责检测和识别网站内容中的违法违规信息。
 
-检测原则：
-• 严格按照中国法律法规标准进行审查
-• 重点检测黄赌毒等违法内容
-• 识别欺诈、虚假广告、非法集资等风险
-• 检测政治敏感、极端思想等内容
-• 基于客观事实和明确证据做出判断
-• 避免误报和漏报，保持专业和中立""",
+你的主要职责：
+• 检测黄色、色情内容（成人内容、色情图片、性相关内容）
+• 识别赌博内容（线上博彩、赌场、竞猬平台）
+• 发现毒品相关内容（毒品交易、吸毒用具、制毒方法）
+• 识别其他违法内容（欺诈、洗钱、危险物品、虚假信息）
 
-            "domain_classifier": """你是一个专业的域名分类专家，专门负责识别和分类互联网域名的功能和用途。
+分析原则：
+• 保持客观公正，不过度解读
+• 严格按照中国法律法规标准进行判断
+• 提供具体可靠的证据和建议
+• 区分正常内容和违法内容，避免误报""",
 
-分类标准：
-• CDN和内容分发: 静态资源、缓存、加速服务
-• 分析和追踪: 用户行为分析、统计、监控
-• 广告和营销: 广告网络、营销工具、推广平台
-• 社交和通信: 社交媒体、即时通讯、社区平台
-• 支付和金融: 支付处理、金融服务、电商工具
-• 安全和认证: 安全服务、身份认证、防护工具
-• 云服务和API: 云计算、数据服务、接口服务
+            "domain_classifier": """你是一个专业的网络内容安全审核师，专门负责检测网站中的黄赌毒等违法违规内容。
 
-分析时请考虑技术实现、业务模式、用户交互等多个维度。""",
+重点检测内容：
+
+1. **黄色色情内容**：
+   - 成人网站、色情视频、性用品销售
+   - 性服务广告、招嫦信息
+   - 暴露性图片、描述性行为的文字
+
+2. **赌博内容**：
+   - 线上赌场、博彩网站、体育博彩
+   - 赌博平台推广、赌博技巧分享
+   - 竞猬游戏、老虎机等赌博工具
+
+3. **毒品相关内容**：
+   - 毒品交易、毒品销售信息
+   - 吸毒用具、制毒原料销售
+   - 引导吸毒、毒品使用经历分享
+
+4. **其他违法内容**：
+   - 电信诈骗、网络诈骗、金融诈骗
+   - 洗钱服务、非法集资
+   - 危险物品销售、非法武器交易
+   - 传销组织、邪教组织宣传
+
+审核标准：严格遵守中国法律法规，准确识别违法内容，对正常内容不要误报。""",
 
             "security_analyzer": """你是一个专业的网络安全分析师，专门识别网站和域名的安全风险和威胁。
 
@@ -99,40 +117,53 @@ class AdvancedPromptBuilder:
 • HIGH: 发现明确的安全威胁或违规行为
 • CRITICAL: 严重的安全威胁，需要立即处理""",
 
-            "comprehensive": """你是一个多领域专家，能够从技术、安全、内容、商业等多个角度对域名和网站进行全面分析。
+            "comprehensive": """你是一个专业的网络内容安全检测专家，能够从多个维度对网站内容进行全面的违法违规检测。
 
 综合分析框架：
-• 技术架构分析: 服务类型、技术实现、基础设施
-• 功能用途识别: 主要功能、服务对象、使用场景
-• 安全风险评估: 安全威胁、风险等级、防护建议
-• 内容合规检查: 内容类型、合规性、违规风险
-• 商业价值评估: 商业模式、市场价值、发展前景
+• **内容安全检测**: 黄色色情、赌博、毒品等违法内容识别
+• **风险等级评估**: 根据内容严重程度进行风险分级
+• **法律合规检查**: 检查是否符合中国法律法规要求
+• **安全建议提供**: 给出具体的处理建议和防范措施
 
-请提供全面、客观、专业的综合分析报告。"""
+请提供全面、客观、专业的综合安全检测报告。"""
         }
     
     def _load_format_templates(self) -> Dict[str, str]:
         """加载回复格式模板"""
         return {
-            "standard": """请按照以下JSON格式返回违法违规内容检测结果：
+            "standard": """请按照以下JSON格式返回违法内容检测结果：
 
 {
     "has_violations": false,
+    "violation_types": ["违法类型列表"],
     "risk_level": "风险等级 (low/medium/high/critical)",
     "confidence_score": 0.85,
-    "violation_types": ["违规类型列表"],
-    "violation_details": "违规详细说明",
-    "content_analysis": {
-        "adult_content": false,
-        "gambling_content": false,
-        "drug_content": false,
-        "fraud_content": false,
-        "illegal_content": false,
-        "political_sensitive": false
-    },
-    "legal_assessment": "法律合规性评估",
+    "violation_details": "违法内容详细说明",
     "evidence": ["证据1", "证据2"],
-    "recommendations": ["建议1", "建议2"],
+    "legal_assessment": {
+        "yellow_content": {
+            "detected": false,
+            "severity": "none",
+            "description": ""
+        },
+        "gambling_content": {
+            "detected": false,
+            "severity": "none", 
+            "description": ""
+        },
+        "drug_content": {
+            "detected": false,
+            "severity": "none",
+            "description": ""
+        },
+        "fraud_content": {
+            "detected": false,
+            "severity": "none",
+            "description": ""
+        }
+    },
+    "recommended_action": "建议采取的行动: allow/monitor/block/report",
+    "analysis_summary": "分析总结",
     "reasoning": "分析推理过程"
 }""",
 
@@ -154,35 +185,57 @@ class AdvancedPromptBuilder:
     "detailed_analysis": "详细安全分析"
 }""",
 
-            "comprehensive": """请按照以下JSON格式返回综合分析结果：
+            "comprehensive": """请按照以下JSON格式返回综合违法内容检测结果：
 
 {
     "overall_assessment": {
-        "domain_category": "域名分类",
+        "has_violations": false,
         "risk_level": "综合风险等级",
         "confidence_score": 0.85
     },
-    "technical_analysis": {
-        "service_type": "服务类型",
-        "technology_stack": ["技术栈"],
-        "infrastructure_quality": "基础设施质量"
-    },
-    "security_analysis": {
-        "security_score": 0.8,
-        "threat_level": "威胁等级",
-        "vulnerabilities": ["漏洞列表"]
-    },
     "content_analysis": {
-        "content_type": "内容类型",
-        "content_quality": "内容质量",
-        "compliance_status": "合规状态"
+        "yellow_content": {
+            "detected": false,
+            "type": "none",
+            "severity": "low",
+            "evidence": [],
+            "confidence": 0.0
+        },
+        "gambling_content": {
+            "detected": false,
+            "type": "none", 
+            "severity": "low",
+            "evidence": [],
+            "confidence": 0.0
+        },
+        "drug_content": {
+            "detected": false,
+            "type": "none",
+            "severity": "low", 
+            "evidence": [],
+            "confidence": 0.0
+        },
+        "other_illegal": {
+            "detected": false,
+            "types": [],
+            "severity": "low",
+            "evidence": [],
+            "confidence": 0.0
+        }
+    },
+    "legal_compliance": {
+        "china_law_compliant": true,
+        "violation_categories": [],
+        "legal_references": [],
+        "severity_assessment": "compliant"
     },
     "recommendations": {
         "immediate_actions": ["立即行动"],
         "monitoring_strategy": "监控策略",
-        "risk_mitigation": ["风险缓解"]
+        "risk_mitigation": ["风险缓解措施"],
+        "reporting_required": false
     },
-    "detailed_reasoning": "详细分析推理"
+    "detailed_reasoning": "详细分析推理和法律依据"
 }"""
         }
     
@@ -282,43 +335,43 @@ class AdvancedPromptBuilder:
         return "\\n\\n".join(prompt_parts)
     
     def _get_task_description(self, analysis_type: AnalysisType) -> str:
-        """获取任务描述"""
+        """获取任务描述（专门用于违法内容检测）"""
         descriptions = {
-            AnalysisType.DOMAIN_CLASSIFICATION: "请对以下域名进行功能分类和用途识别：",
-            AnalysisType.SECURITY_ASSESSMENT: "请对以下域名进行安全风险评估：",
-            AnalysisType.CONTENT_ANALYSIS: "请对以下域名的内容进行安全性和合规性分析：",
-            AnalysisType.COMPREHENSIVE: "请对以下域名进行全面的多维度分析："
+            AnalysisType.DOMAIN_CLASSIFICATION: "请对以下域名的内容进行黄赌毒等违法内容检测：",
+            AnalysisType.SECURITY_ASSESSMENT: "请对以下域名进行安全风险和违法内容评估：",
+            AnalysisType.CONTENT_ANALYSIS: "请对以下域名的内容进行违法违规检测和分析：",
+            AnalysisType.COMPREHENSIVE: "请对以下域名进行全面的违法内容安全检测："
         }
-        return descriptions.get(analysis_type, "请对以下域名进行分析：")
+        return descriptions.get(analysis_type, "请对以下域名进行违法内容检测：")
     
     def _get_analysis_guidance(self, analysis_type: AnalysisType) -> str:
         """获取分析指导"""
         guidance = {
             AnalysisType.DOMAIN_CLASSIFICATION: """分析重点：
-• 识别域名的主要功能和服务类型
-• 确定技术架构和实现方式
-• 分析目标用户群体和使用场景
-• 评估服务的专业性和可信度""",
+• 重点检测黄色色情内容（成人网站、色情内容、性服务）
+• 识别赌博相关内容（线上赌场、博彩网站、竞猬游戏）
+• 发现毒品相关信息（毒品交易、吸毒用具、制毒原料）
+• 其他违法内容（诈骗、洗钱、危险物品、传销组织）""",
 
             AnalysisType.SECURITY_ASSESSMENT: """分析重点：
-• 检查是否存在恶意软件或病毒
-• 识别钓鱼攻击和欺诈行为
-• 评估数据安全和隐私保护
-• 分析技术漏洞和安全缺陷""",
+• 检查是否存在违法违规内容
+• 识别钓鱼攻击和网络诈骗行为
+• 评估内容安全和法律风险
+• 分析潜在的社会危害性和影响""",
 
             AnalysisType.CONTENT_ANALYSIS: """分析重点：
-• 检测违法违规内容
+• 全面检测黄赌毒等违法内容
 • 识别成人和敏感内容
-• 评估内容质量和可信度
-• 分析潜在的社会影响""",
+• 评估内容对未成年人的影响
+• 分析潜在的法律风险和社会危害""",
 
             AnalysisType.COMPREHENSIVE: """分析重点：
-• 从技术、安全、内容、商业等多个维度进行分析
-• 提供全面客观的评估结果
-• 识别主要风险和机会
-• 给出具体可操作的建议"""
+• 从内容安全、法律合规、社会影响等多个维度进行分析
+• 提供全面客观的违法内容检测结果
+• 识别主要风险和法律问题
+• 给出具体可操作的处理建议和防范措施"""
         }
-        return guidance.get(analysis_type, "请进行全面深入的分析。")
+        return guidance.get(analysis_type, "请进行全面深入的违法内容检测。")
     
     def _prepare_content_snippet(self, content: Optional[str]) -> str:
         """准备内容摘要"""

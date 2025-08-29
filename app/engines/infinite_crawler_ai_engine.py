@@ -659,69 +659,8 @@ class InfiniteCrawlerAIEngine:
 
 
 # 便捷函数
-async def create_ai_analysis_config_from_database(user_id: str) -> Optional[AIAnalysisConfig]:
-    """从数据库中创建AI配置"""
-    try:
-        from app.core.database import AsyncSessionLocal
-        from app.models.user import UserAIConfig
-        from sqlalchemy import select
-        
-        async with AsyncSessionLocal() as db:
-            # 查询用户AI配置
-            stmt = select(UserAIConfig).where(UserAIConfig.user_id == user_id)
-            result = await db.execute(stmt)
-            user_ai_config = result.scalar_one_or_none()
-            
-            if not user_ai_config or not user_ai_config.has_valid_config:
-                # 如果没有配置或配置无效，尝试使用系统默认配置
-                from app.models.setting import Setting
-                
-                # 查询系统默认AI配置
-                ai_settings = {}
-                default_settings = [
-                    'openai_api_key', 'openai_base_url', 'ai_model_name',
-                    'openai_max_tokens', 'openai_temperature', 'openai_timeout'
-                ]
-                
-                for setting_key in default_settings:
-                    setting_stmt = select(Setting).where(Setting.key == setting_key)
-                    setting_result = await db.execute(setting_stmt)
-                    setting = setting_result.scalar_one_or_none()
-                    if setting and setting.value:
-                        ai_settings[setting_key] = setting.value
-                
-                # 检查必要的配置项
-                if not ai_settings.get('openai_api_key') or not ai_settings.get('openai_base_url'):
-                    return None
-                
-                config = AIAnalysisConfig(
-                    api_key=ai_settings['openai_api_key'],
-                    base_url=ai_settings.get('openai_base_url', 'https://api.openai.com/v1'),
-                    model=ai_settings.get('ai_model_name', 'gpt-4-vision-preview'),
-                    max_tokens=int(ai_settings.get('openai_max_tokens', '1500')),
-                    temperature=float(ai_settings.get('openai_temperature', '0.3')),
-                    timeout=int(ai_settings.get('openai_timeout', '60'))
-                )
-            else:
-                # 使用用户自定义配置
-                config = AIAnalysisConfig(
-                    api_key=str(user_ai_config.openai_api_key),
-                    base_url=str(user_ai_config.openai_base_url or 'https://api.openai.com/v1'),
-                    model=str(user_ai_config.ai_model_name or 'gpt-4-vision-preview'),
-                    max_tokens=int(user_ai_config.openai_max_tokens or 1500),
-                    temperature=float(user_ai_config.openai_temperature or 0.3),
-                    timeout=60
-                )
-            
-            return config
-            
-    except Exception as e:
-        print(f"从数据库加载AI配置失败: {e}")
-        return None
-
-
 async def create_ai_analysis_config_from_env() -> Optional[AIAnalysisConfig]:
-    """从环境变量创建AI配置（保留作为备用）"""
+    """从环境变量创建AI配置"""
     import os
     
     api_key = os.getenv('OPENAI_API_KEY')

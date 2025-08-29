@@ -164,14 +164,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { taskAPI } from '@/api/task'
+import { useWebSocketStore } from '@/stores/websocket'
 import type { Task, TaskFilter } from '@/types/api'
 
 const router = useRouter()
+const wsStore = useWebSocketStore()
 
 // 响应式状态
 const loading = ref(false)
@@ -384,8 +386,124 @@ const batchDeleteTasks = async () => {
   }
 }
 
-onMounted(() => {
-  searchTasks()
+// WebSocket事件监听
+const setupWebSocketListeners = () => {
+  // 监听任务状态更新
+  wsStore.on('task_status_update', (data: any) => {
+    console.log('任务状态更新:', data)
+    // 查找并更新对应的任务
+    const taskIndex = tasks.value.findIndex(task => task.id === data.task_id)
+    if (taskIndex !== -1) {
+      Object.assign(tasks.value[taskIndex], {
+        status: data.status,
+        progress: data.progress || tasks.value[taskIndex].progress,
+        updated_at: new Date().toISOString()
+      })
+    }
+  })
+  
+  // 监听任务进度更新
+  wsStore.on('task_progress_update', (data: any) => {
+    console.log('任务进度更新:', data)
+    const taskIndex = tasks.value.findIndex(task => task.id === data.task_id)
+    if (taskIndex !== -1) {
+      Object.assign(tasks.value[taskIndex], {
+        progress: data.progress,
+        status: data.status || tasks.value[taskIndex].status,
+        current_stage: data.stage
+      })
+    }
+  })
+  
+  // 监听任务完成
+  wsStore.on('task_completed', (data: any) => {
+    console.log('任务完成:', data)
+    const taskIndex = tasks.value.findIndex(task => task.id === data.task_id)
+    if (taskIndex !== -1) {
+      Object.assign(tasks.value[taskIndex], {
+        status: data.status,
+        progress: 100,
+        completed_at: new Date().toISOString(),
+        statistics: data.statistics
+      })
+    }
+  })
+  
+  // 监听新任务创建
+  wsStore.on('task_created', (data: any) => {
+    console.log('新任务创建:', data)
+    // 如果当前在第一页，添加新任务到列表顶部
+    if (pagination.page === 1) {
+      tasks.value.unshift({
+        id: data.task_id,
+        target_domain: data.target_domain,
+        status: 'pending',
+        progress: 0,
+        created_at: new Date().toISOString(),
+        ...data
+      })
+      // 保持列表长度不超过页面大小
+      if (tasks.value.length > pagination.size) {
+        tasks.value.pop()
+      }
+      pagination.total += 1
+    }
+  })
+  
+  // 监听任务开始执行
+  wsStore.on('task_started', (data: any) => {
+    console.log('任务开始执行:', data)
+    const taskIndex = tasks.value.findIndex(task => task.id === data.task_id)
+    if (taskIndex !== -1) {
+      Object.assign(tasks.value[taskIndex], {
+        status: 'running',
+        started_at: new Date().toISOString()
+      })
+    }
+  })
+}
+
+const removeWebSocketListeners = () => {
+  wsStore.off('task_status_update')
+  wsStore.off('task_progress_update')
+  wsStore.off('task_completed')
+  wsStore.off('task_created')
+  wsStore.off('task_started')
+}
+
+onMounted(async () => {
+  await searchTasks()
+  
+  // 确保WebSocket连接
+  if (!wsStore.isConnected) {
+    try {
+      await wsStore.connect()
+      console.log('TaskList WebSocket连接成功')
+    } catch (error) {
+      console.error('TaskList WebSocket连接失败:', error)
+      ElMessage.warning('实时更新功能不可用，任务状态需要手动刷新')
+    }
+  }
+  
+  setupWebSocketListeners()
+  
+  // 定时刷新任务列表（作为WebSocket的备用）
+  const refreshInterval = setInterval(() => {
+    // 如果WebSocket未连接或长时间未收到更新，刷新列表
+    if (!wsStore.isConnected) {
+      console.log('WebSocket未连接，执行定时刷新')
+      searchTasks()
+    }
+  }, 30000) // 每30秒检查一次
+  
+  // 组件卸载时清理
+  onUnmounted(() => {
+    clearInterval(refreshInterval)
+  })
+})
+
+onUnmounted(() => {
+  removeWebSocketListeners()
 })
 </script>
 

@@ -41,7 +41,6 @@ from app.engines.infinite_crawler_ai_engine import (
     AIAnalysisConfig, 
     DomainAnalysisRequest,
     AIAnalysisResult,
-    create_ai_analysis_config_from_database,
     create_ai_analysis_config_from_env
 )
 from app.engines.ai_result_processor import (
@@ -49,10 +48,16 @@ from app.engines.ai_result_processor import (
     ProcessedDomainResult,
     RiskLevel
 )
-from app.engines.domain_database_manager import (
-    DomainDatabaseManager,
-    DomainRecord,
-    create_domain_database_manager
+from app.engines.domain_classifier import (
+    DomainClassifier,
+    DomainClassification,
+    DomainType,
+    DomainPriority
+)
+from app.engines.content_analyzer import (
+    ContentAnalyzer,
+    ContentAnalysisResult,
+    extract_ai_analysis_data
 )
 
 
@@ -60,7 +65,7 @@ from app.engines.domain_database_manager import (
 class DomainInfo:
     """域名信息"""
     domain: str
-    domain_type: str  # 'target_subdomain', 'third_party'
+    domain_type: str  # 保留原字段兼容性
     discovered_at: datetime
     discovery_method: str
     source_urls: List[str] = field(default_factory=list)
@@ -76,6 +81,10 @@ class DomainInfo:
     found_links: List[str] = field(default_factory=list)
     screenshot_path: Optional[str] = None
     risk_level: str = 'unknown'
+    
+    # 新增：智能域名分类结果
+    classification: Optional['DomainClassification'] = None
+    priority: int = 3  # 1-5，5为最高优先级
     
 
 @dataclass
@@ -115,7 +124,15 @@ class InfiniteCrawlerEngine:
         self.ai_engine: Optional[AIAnalysisEngine] = None  # 原始AI引擎（向后兼容）
         self.crawler_ai_engine: Optional[InfiniteCrawlerAIEngine] = None  # 新的AI引擎
         self.result_processor: Optional[AIResultProcessor] = None  # AI结果处理器
-        self.domain_db_manager: Optional[DomainDatabaseManager] = None  # 域名数据库管理器
+        
+        # 域名分类器
+        self.domain_classifier = DomainClassifier(task_id, user_id, target_domain)
+        
+        # 内容分析器
+        self.content_analyzer = ContentAnalyzer(task_id, user_id, target_domain)
+        
+        # 域名分类队列
+        self.domain_classification_queue: deque = deque()  # 待分类的域名
         
         # 无限迭代控制器
         self.iteration_controller = InfiniteIterationController(task_id, user_id, target_domain)
@@ -139,23 +156,33 @@ class InfiniteCrawlerEngine:
         self.ai_config: Optional[AIAnalysisConfig] = None
     
     async def _ensure_ai_engine_initialized(self) -> bool:
-        """确保AI引擎已初始化"""
+        """确保AI引擎已初始化，从数据库获取用户AI配置"""
         if self.crawler_ai_engine:
             return True
         
         try:
-            # 优先从数据库读取AI配置
-            self.ai_config = await create_ai_analysis_config_from_database(self.user_id)
+            # 从数据库获取用户AI配置
+            from app.core.database import AsyncSessionLocal
+            from app.services.user_service import AIConfigService
             
-            # 如果数据库中没有配置，尝试环境变量
-            if not self.ai_config:
-                self.ai_config = await create_ai_analysis_config_from_env()
-            
-            if not self.ai_config:
-                self.logger.warning("AI配置不可用，跳过AI分析")
-                return False
-            
-            self.logger.info(f"AI配置加载成功: 模型={self.ai_config.model}, API={self.ai_config.base_url}")
+            async with AsyncSessionLocal() as db:
+                ai_config_service = AIConfigService(db)
+                user_ai_config = await ai_config_service.get_user_ai_config(self.user_id)
+                
+                if not user_ai_config or not user_ai_config.has_valid_config:
+                    self.logger.warning("用户AI配置不可用，跳过AI分析")
+                    return False
+                
+                # 创建AI配置
+                self.ai_config = AIAnalysisConfig(
+                    api_key=str(user_ai_config.openai_api_key) if user_ai_config.openai_api_key is not None else "",
+                    base_url=str(user_ai_config.openai_base_url) if user_ai_config.openai_base_url is not None else "https://api.openai.com/v1",
+                    model=str(user_ai_config.model_name) if user_ai_config.model_name is not None else "gpt-4-vision-preview",
+                    max_tokens=user_ai_config.max_tokens_int,
+                    temperature=user_ai_config.temperature_float,
+                    timeout=user_ai_config.request_timeout_int,
+                    max_retries=user_ai_config.retry_count_int
+                )
             
             # 初始化AI引擎
             self.crawler_ai_engine = InfiniteCrawlerAIEngine(
@@ -200,10 +227,6 @@ class InfiniteCrawlerEngine:
         try:
             # 配置迭代控制器
             self.iteration_controller.configure_stopping_conditions(config)
-            
-            # 初始化域名数据库管理器
-            self.domain_db_manager = create_domain_database_manager(self.task_id, self.user_id)
-            self.logger.info("域名数据库管理器初始化成功")
             
             # 阶段1: 初始化目标域名
             self.iteration_controller.update_phase(IterationPhase.INITIALIZING)
@@ -280,11 +303,6 @@ class InfiniteCrawlerEngine:
                 self.iteration_controller.cleanup()
                 await self.third_party_access_manager.cleanup()
                 await self.domain_analyzer.cleanup()
-                
-                # 清理域名数据库管理器
-                if self.domain_db_manager:
-                    await self.domain_db_manager.cleanup()
-                    
             except Exception as cleanup_error:
                 self.logger.warning(f"资源清理警告: {cleanup_error}")
     
@@ -698,51 +716,7 @@ class InfiniteCrawlerEngine:
             return await self._fallback_extract_domains_from_links(links)
     
     async def _add_domain_to_pool(self, domain: str, domain_type: str, discovery_method: str, source_urls: List[str]):
-        """添加域名到全局池（使用域名数据库管理器）"""
-        if self.domain_db_manager:
-            # 使用域名数据库管理器
-            is_new, domain_record = self.domain_db_manager.add_domain(
-                domain, domain_type, discovery_method, source_urls
-            )
-            
-            # 同步到内存池（保持兼容性）
-            if is_new or domain not in self.all_domains:
-                # 从域名记录创建 DomainInfo
-                domain_info = DomainInfo(
-                    domain=domain_record.domain,
-                    domain_type=domain_record.domain_type,
-                    discovered_at=domain_record.first_discovered,
-                    discovery_method=domain_record.discovery_method,
-                    source_urls=domain_record.source_urls.copy()
-                )
-                
-                # 同步分析状态
-                domain_info.is_accessible = domain_record.is_accessible
-                domain_info.ai_analyzed = domain_record.ai_analyzed
-                domain_info.risk_level = domain_record.risk_level
-                
-                self.all_domains[domain_record.domain] = domain_info
-                
-                # 添加到相应队列
-                if domain_type == 'target_subdomain' or domain_type == 'third_party':
-                    # 所有域名都需要进行子域名发现
-                    self.subdomain_discovery_queue.append(domain_record.domain)
-                    # 所有域名都需要进行内容爬取
-                    self.content_crawl_queue.append(domain_record.domain)
-                    # 第三方域名和可疑域名需要AI分析
-                    if domain_type == 'third_party':
-                        self.ai_analysis_queue.append(domain_record.domain)
-                
-                if is_new:
-                    self.logger.debug(f"新域名入池: {domain_record.domain} ({domain_type})")
-                else:
-                    self.logger.debug(f"更新域名: {domain_record.domain} ({domain_type})")
-        else:
-            # 备用逻辑（用于向后兼容）
-            await self._legacy_add_domain_to_pool(domain, domain_type, discovery_method, source_urls)
-    
-    async def _legacy_add_domain_to_pool(self, domain: str, domain_type: str, discovery_method: str, source_urls: List[str]):
-        """传统的域名添加方法（备用）"""
+        """添加域名到全局池（含智能分类）"""
         if domain in self.all_domains:
             # 域名已存在，更新源URL
             self.all_domains[domain].source_urls.extend(source_urls)
@@ -752,28 +726,99 @@ class InfiniteCrawlerEngine:
             self.logger.warning(f"已达到最大域名数量限制: {self.max_total_domains}")
             return
         
+        # 先进行智能域名分类
+        classification = await self.domain_classifier.classify_domain(
+            domain, 
+            source_url=source_urls[0] if source_urls else None,
+            discovery_method=discovery_method
+        )
+        
+        # 基于分类结果确定域名类型和优先级
+        final_domain_type = self._determine_domain_type_from_classification(classification)
+        priority = classification.priority.value
+        
         # 添加新域名
         domain_info = DomainInfo(
             domain=domain,
-            domain_type=domain_type,
+            domain_type=final_domain_type,
             discovered_at=datetime.utcnow(),
             discovery_method=discovery_method,
-            source_urls=source_urls
+            source_urls=source_urls,
+            classification=classification,
+            priority=priority
         )
         
         self.all_domains[domain] = domain_info
         
-        # 添加到相应队列
-        if domain_type == 'target_subdomain' or domain_type == 'third_party':
-            # 所有域名都需要进行子域名发现
-            self.subdomain_discovery_queue.append(domain)
-            # 所有域名都需要进行内容爬取
-            self.content_crawl_queue.append(domain)
-            # 第三方域名和可疑域名需要AI分析
-            if domain_type == 'third_party':
-                self.ai_analysis_queue.append(domain)
+        # 基于智能分类结果决定处理队列
+        self._add_to_queues_based_on_classification(domain, classification)
         
-        self.logger.debug(f"新域名入池: {domain} ({domain_type})")
+        self.logger.info(f"新域名入池: {domain} ({final_domain_type}, 优先级:{priority}, 类型:{classification.domain_type.value})")
+    
+    def _determine_domain_type_from_classification(self, classification: DomainClassification) -> str:
+        """基于分类结果确定域名类型（保持向后兼容性）"""
+        if classification.domain_type in [DomainType.TARGET_MAIN, DomainType.TARGET_SUBDOMAIN]:
+            return 'target_subdomain'
+        else:
+            return 'third_party'
+    
+    def _add_to_queues_based_on_classification(self, domain: str, classification: DomainClassification):
+        """基于智能分类结果决定添加到哪些队列"""
+        # 忽略低优先级域名（如广告、分析等）
+        if classification.priority == DomainPriority.IGNORE:
+            self.logger.debug(f"忽略低优先级域名: {domain} ({classification.domain_type.value})")
+            return
+        
+        # 高优先级和目标相关域名进行子域名发现
+        if classification.priority.value >= DomainPriority.MEDIUM.value:
+            self.subdomain_discovery_queue.append(domain)
+        
+        # 关键和高优先级域名进行内容爬取
+        if classification.priority.value >= DomainPriority.HIGH.value:
+            self.content_crawl_queue.append(domain)
+        
+        # 第三方域名和可疑域名需要AI分析
+        if (classification.domain_type in [
+            DomainType.THIRD_PARTY, 
+            DomainType.SUSPICIOUS, 
+            DomainType.UNKNOWN
+        ] and classification.priority.value >= DomainPriority.MEDIUM.value):
+            self.ai_analysis_queue.append(domain)
+        
+        # 目标子域名也进行AI分析（检测违法内容）
+        if classification.domain_type in [DomainType.TARGET_MAIN, DomainType.TARGET_SUBDOMAIN]:
+            self.ai_analysis_queue.append(domain)
+    
+    def get_domain_classification_statistics(self) -> Dict[str, Any]:
+        """获取域名分类统计信息"""
+        classification_stats = self.domain_classifier.get_classification_statistics()
+        
+        # 添加当前爬虫引擎的统计信息
+        engine_stats = {
+            'total_domains_in_pool': len(self.all_domains),
+            'subdomain_discovery_queue_size': len(self.subdomain_discovery_queue),
+            'content_crawl_queue_size': len(self.content_crawl_queue),
+            'ai_analysis_queue_size': len(self.ai_analysis_queue),
+            'high_priority_domains': len(self.get_high_priority_domains()),
+            'total_violations_found': self.total_violations_found
+        }
+        
+        classification_stats.update(engine_stats)
+        return classification_stats
+    
+    def get_high_priority_domains(self, min_priority: DomainPriority = DomainPriority.HIGH) -> List[str]:
+        """获取高优先级域名列表"""
+        return [
+            domain for domain, info in self.all_domains.items()
+            if info.classification and info.classification.priority.value >= min_priority.value
+        ]
+    
+    def get_domain_by_type(self, domain_type: DomainType) -> List[str]:
+        """根据分类类型获取域名列表"""
+        return [
+            domain for domain, info in self.all_domains.items()
+            if info.classification and info.classification.domain_type == domain_type
+        ]
     
     async def _enhanced_third_party_analysis(self, config: Dict[str, Any]):
         """增强的第三方域名分析阶段"""
@@ -896,16 +941,23 @@ class InfiniteCrawlerEngine:
             
             # 使用结果处理器处理AI分析结果
             if self.result_processor:
-                for ai_result in ai_results:
-                    if ai_result.analysis_success:
-                        # 使用结果处理器处理结果
-                        processed_result = await self.result_processor.process_analysis_result(ai_result)
-                        processed_results.append(processed_result)
+                try:
+                    processed_results = await self.result_processor.process_ai_results(ai_results)
+                    self.logger.info(f"结果处理器处理了 {len(processed_results)} 个AI分析结果")
+                except Exception as e:
+                    self.logger.error(f"结果处理器处理失败: {e}")
+                    # 如果结果处理器失败，继续使用原始结果
+                    processed_results = []
+            
+            for i, ai_result in enumerate(ai_results):
+                if ai_result.analysis_success:
+                    # 更新域名信息
+                    if ai_result.domain in self.all_domains:
+                        domain_info = self.all_domains[ai_result.domain]
                         
-                        # 更新域名信息
-                        if ai_result.domain in self.all_domains:
-                            domain_info = self.all_domains[ai_result.domain]
-                            
+                        # 使用处理后的结果（如果有）
+                        if i < len(processed_results):
+                            processed_result = processed_results[i]
                             # 更新风险等级
                             domain_info.risk_level = processed_result.risk_level.value
                             
@@ -914,10 +966,6 @@ class InfiniteCrawlerEngine:
                             setattr(domain_info, 'ai_analysis_result', ai_result)
                             setattr(domain_info, 'processed_result', processed_result)
                             
-                            # 更新域名数据库管理器
-                            if self.domain_db_manager:
-                                self.domain_db_manager.update_domain_analysis(ai_result.domain, processed_result)
-                            
                             # 统计高风险域名
                             if processed_result.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
                                 ai_violations_found += 1
@@ -925,25 +973,11 @@ class InfiniteCrawlerEngine:
                             # 统计违规域名
                             if processed_result.has_violations:
                                 self.total_violations_found += 1
-                                self.logger.warning(f"发现违规域名: {ai_result.domain} - {processed_result.violation_types}")
+                                self.logger.warning(f"发现违法内容域名: {ai_result.domain} - {processed_result.violation_types} - 建议操作: {processed_result.recommended_action}")
                             
-                            self.logger.debug(f"域名 {ai_result.domain} AI分析完成: 风险{processed_result.risk_level.value}, 置信度{processed_result.confidence_score:.2f}")
-                    else:
-                        self.logger.warning(f"域名 {ai_result.domain} AI分析失败: {ai_result.error_message}")
-                        
-                # 批量更新域名数据库
-                if processed_results:
-                    await self.result_processor.batch_update_domain_database(processed_results, self.task_id)
-                    self.logger.info(f"已将 {len(processed_results)} 个处理结果更新到域名数据库")
-            else:
-                # 如果没有结果处理器，使用原始处理逻辑
-                for ai_result in ai_results:
-                    if ai_result.analysis_success:
-                        # 更新域名信息
-                        if ai_result.domain in self.all_domains:
-                            domain_info = self.all_domains[ai_result.domain]
-                            
-                            # 更新风险等级
+                            self.logger.debug(f"域名 {ai_result.domain} AI分析和处理完成: 风险{processed_result.risk_level.value}, 置信度{processed_result.confidence_score:.2f}, 建议{processed_result.recommended_action}")
+                        else:
+                            # 使用原始结果
                             domain_info.risk_level = ai_result.risk_level
                             
                             # 标记AI分析完成
@@ -960,8 +994,8 @@ class InfiniteCrawlerEngine:
                                 self.logger.warning(f"发现违规域名: {ai_result.domain} - {ai_result.violation_types}")
                             
                             self.logger.debug(f"域名 {ai_result.domain} AI分析完成: 风险{ai_result.risk_level}, 置信度{ai_result.confidence_score:.2f}")
-                    else:
-                        self.logger.warning(f"域名 {ai_result.domain} AI分析失败: {ai_result.error_message}")
+                else:
+                    self.logger.warning(f"域名 {ai_result.domain} AI分析失败: {ai_result.error_message}")
             
             # 获取AI分析统计
             ai_stats = {}

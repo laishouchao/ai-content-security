@@ -10,7 +10,7 @@ import time
 import hashlib
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from urllib.parse import urlparse
 from pathlib import Path
 import tempfile
@@ -286,52 +286,64 @@ class ThirdPartyDomainClassifier:
 """
             
             # 准备图片（如果有截图）
-            image_data = None
+            image_data = ""
             if screenshot_path and Path(screenshot_path).exists():
                 with open(screenshot_path, 'rb') as f:
                     image_data = base64.b64encode(f.read()).decode('utf-8')
             
             # 调用AI分析
-            ai_result = await self.ai_engine.analyze_content(
-                content=analysis_content,
-                system_prompt=self.classification_prompt,
-                image_data=image_data,
-                analysis_type="domain_classification"
-            )
+            from app.engines.ai_analysis import OpenAIClient
+            async with OpenAIClient(self.ai_engine.ai_config, self.ai_engine.logger) as client:
+                ai_result = await client.analyze_content(
+                    prompt=f"{self.classification_prompt}\n\n{analysis_content}",
+                    image_data=image_data
+                )
             
-            if ai_result.get('success'):
-                # 解析AI返回的JSON结果
-                ai_response = ai_result.get('analysis_result', '{}')
+            if ai_result and 'choices' in ai_result and ai_result['choices']:
+                # 提取AI响应内容
+                content = ai_result['choices'][0]['message']['content']
                 try:
-                    classification_result = json.loads(ai_response)
-                    
-                    # 验证结果格式
-                    required_fields = ['domain_type', 'risk_level', 'confidence', 'description']
-                    for field in required_fields:
-                        if field not in classification_result:
-                            classification_result[field] = 'unknown' if field != 'confidence' else 0.0
-                    
-                    # 确保confidence在有效范围内
-                    confidence = classification_result.get('confidence', 0.0)
-                    if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
-                        classification_result['confidence'] = 0.5
-                    
-                    return {
-                        'success': True,
-                        'classification': classification_result,
-                        'ai_raw_result': ai_result
-                    }
-                    
-                except json.JSONDecodeError as e:
-                    return {
-                        'success': False,
-                        'error': f'AI返回格式解析失败: {e}',
-                        'ai_raw_result': ai_result
-                    }
+                    classification_result = json.loads(content)
+                except json.JSONDecodeError:
+                    # 如果不是标准JSON，尝试提取JSON部分
+                    import re
+                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if json_match:
+                        try:
+                            classification_result = json.loads(json_match.group())
+                        except json.JSONDecodeError as e:
+                            return {
+                                'success': False,
+                                'error': f'AI返回格式解析失败: {e}',
+                                'ai_raw_result': ai_result
+                            }
+                    else:
+                        return {
+                            'success': False,
+                            'error': 'AI返回中未找到有效JSON格式',
+                            'ai_raw_result': ai_result
+                        }
+                
+                # 验证结果格式
+                required_fields = ['domain_type', 'risk_level', 'confidence', 'description']
+                for field in required_fields:
+                    if field not in classification_result:
+                        classification_result[field] = 'unknown' if field != 'confidence' else 0.0
+                
+                # 确保confidence在有效范围内
+                confidence = classification_result.get('confidence', 0.0)
+                if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+                    classification_result['confidence'] = 0.5
+                
+                return {
+                    'success': True,
+                    'classification': classification_result,
+                    'ai_raw_result': ai_result
+                }
             else:
                 return {
                     'success': False,
-                    'error': ai_result.get('error', 'AI分析失败'),
+                    'error': 'AI分析失败：无有效响应',
                     'ai_raw_result': ai_result
                 }
                 
@@ -397,7 +409,7 @@ class ThirdPartyDomainAnalyzer:
                 return result
             
             # 步骤3: AI分类（如果有AI引擎）
-            if await self._ensure_ai_classifier():
+            if await self._ensure_ai_classifier() and self.ai_classifier is not None:
                 classification_result = await self.ai_classifier.classify_domain(
                     domain, content_result, result.screenshot_path
                 )
@@ -465,7 +477,17 @@ class ThirdPartyDomainAnalyzer:
             try:
                 # 使用简单的AI配置
                 from app.core.config import settings
-                ai_config = getattr(settings, 'DEFAULT_AI_CONFIG', {})
+                from app.models.user import UserAIConfig
+                
+                # 创建默认AI配置
+                default_config = getattr(settings, 'DEFAULT_AI_CONFIG', {})
+                ai_config = UserAIConfig(
+                    openai_api_key=default_config.get('openai_api_key', ''),
+                    openai_base_url=default_config.get('openai_base_url', ''),
+                    ai_model_name=default_config.get('ai_model_name', 'gpt-4'),
+                    has_valid_config=True
+                )
+                
                 ai_engine = AIAnalysisEngine(self.task_id, ai_config)
                 self.ai_classifier = ThirdPartyDomainClassifier(ai_engine)
                 return True

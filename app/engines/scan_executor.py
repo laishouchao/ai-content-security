@@ -71,6 +71,7 @@ class ScanTaskExecutor:
         self.identifier_engine = ThirdPartyIdentifierEngine(task_id, user_id)
         self.capture_engine = ContentCaptureEngine(task_id, user_id)
         self.ai_engine = None  # 将在需要时初始化
+        self.domain_classifier = None  # 将在需要时初始化
         
         # 执行状态
         self.is_running = False
@@ -240,31 +241,66 @@ class ScanTaskExecutor:
                         urls_to_crawl.add(f"https://{new_sub}")
                         urls_to_crawl.add(f"http://{new_sub}")
                 
-                # 将所有发现的链接中属于目标域名的添加到待爬取队列
+                # 将所有发现的链接进行正确的域名分类
                 for link in all_found_links:
-                    if self._is_target_domain_or_subdomain(link, result.target_domain):
-                        if link not in all_crawled_urls:
-                            urls_to_crawl.add(link)
-                            all_crawled_urls.add(link)
-                    # 对于第三方域名，直接添加到第三方域名识别队列，不进行深度爬取
+                    extracted_domain = self._extract_domain_from_url(link)
+                    if not extracted_domain:
+                        continue
+                    
+                    # 使用域名分类器进行正确分类
+                    if self.domain_classifier is None:
+                        # 初始化域名分类器
+                        from app.engines.domain_classifier import DomainClassifier
+                        self.domain_classifier = DomainClassifier(result.target_domain, self.task_id, self.user_id)
+                    
+                    # 进行域名分类
+                    classification = await self.domain_classifier.classify_domain(extracted_domain)
+                    
+                    # 根据分类结果处理域名
+                    if classification.domain_type.value in ['target_main', 'target_subdomain']:
+                        # 这是目标域名或子域名
+                        if self._is_target_domain_or_subdomain(link, result.target_domain):
+                            # 添加到待爬取队列
+                            if link not in all_crawled_urls:
+                                urls_to_crawl.add(link)
+                                all_crawled_urls.add(link)
+                        
+                        # 如果是新发现的子域名，添加到子域名结果中
+                        if (extracted_domain != result.target_domain.lower() and 
+                            extracted_domain.endswith(f'.{result.target_domain.lower()}')):
+                            existing_subdomains = {s.subdomain for s in result.subdomains}
+                            if extracted_domain not in existing_subdomains:
+                                # 创建新的子域名结果
+                                sub_result = SubdomainResult(extracted_domain, "link_crawling")
+                                result.subdomains.append(sub_result)
+                                existing_subdomains.add(extracted_domain)
+                                
+                                # 将新子域名添加到待爬取URL中
+                                urls_to_crawl.add(f"https://{extracted_domain}")
+                                urls_to_crawl.add(f"http://{extracted_domain}")
+                                
+                                self.logger.info(f"通过链接爬取发现新子域名: {extracted_domain}")
+                                
+                                # 立即保存新发现的子域名到数据库
+                                await self._save_single_subdomain_result(result.task_id, sub_result)
                     else:
-                        third_party_domain = self._extract_domain_from_url(link)
-                        if third_party_domain:
-                            # 检查是否已经存在于第三方域名结果中
-                            existing_third_party = {d.domain for d in result.third_party_domains}
-                            if third_party_domain not in existing_third_party:
-                                # 创建第三方域名结果
-                                from app.engines.third_party_identifier import ThirdPartyDomainResult
-                                third_party_result = ThirdPartyDomainResult(
-                                    domain=third_party_domain,
-                                    domain_type="unknown",  # 后续会进行分类
-                                    risk_level="low",       # 后续会进行风险评估
-                                    found_on_urls=[link],
-                                    confidence_score=0.5,
-                                    description=f"从链接中发现的第三方域名: {third_party_domain}",
-                                    category_tags=["discovered_from_crawling"]
-                                )
-                                result.third_party_domains.append(third_party_result)
+                        # 这是第三方域名
+                        existing_third_party = {d.domain for d in result.third_party_domains}
+                        if extracted_domain not in existing_third_party:
+                            # 创建第三方域名结果
+                            from app.engines.third_party_identifier import ThirdPartyDomainResult
+                            third_party_result = ThirdPartyDomainResult(
+                                domain=extracted_domain,
+                                domain_type=classification.domain_type.value,  # 使用分类器的结果
+                                risk_level="low",       # 后续会进行风险评估
+                                found_on_urls=[link],
+                                confidence_score=classification.confidence_score,
+                                description=f"从链接中发现的第三方域名: {extracted_domain} ({classification.domain_type.value})",
+                                category_tags=["discovered_from_crawling", classification.domain_type.value]
+                            )
+                            result.third_party_domains.append(third_party_result)
+                            
+                            self.logger.debug(f"发现第三方域名: {extracted_domain} (类型: {classification.domain_type.value})")
                 
                 current_iteration += 1
                 
@@ -276,6 +312,10 @@ class ScanTaskExecutor:
             # 获取全量链接
             result.all_crawled_links = self.crawler_engine.all_crawled_links
             
+            # 更新子域名统计信息（包括新发现的子域名）
+            result.statistics['total_subdomains'] = len(result.subdomains)
+            result.statistics['accessible_subdomains'] = sum(1 for s in result.subdomains if s.is_accessible)
+            
             # 获取爬取统计
             crawl_stats = await self.crawler_engine.get_crawl_statistics()
             result.statistics.update({
@@ -285,6 +325,10 @@ class ScanTaskExecutor:
             })
             
             self.logger.info(f"改进的链接爬取完成: {len(all_crawl_results)} 个页面，迭代 {current_iteration} 次")
+            
+            # 更新数据库中的子域名统计信息
+            if len(result.subdomains) > 0:
+                await self._update_subdomain_statistics(result)
             
         except Exception as e:
             error_msg = f"改进的链接爬取失败: {str(e)}"
@@ -765,6 +809,67 @@ class ScanTaskExecutor:
             self.logger.error(f"保存子域名结果失败: {e}")
             import traceback
             self.logger.error(f"错误堆栈追踪: {traceback.format_exc()}")
+    
+    async def _save_single_subdomain_result(self, task_id: str, subdomain: SubdomainResult):
+        """保存单个子域名结果到数据库"""
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.task import SubdomainRecord
+            
+            async with AsyncSessionLocal() as db:
+                # 检查是否已存在
+                from sqlalchemy import select
+                existing_query = select(SubdomainRecord).where(
+                    SubdomainRecord.task_id == task_id,
+                    SubdomainRecord.subdomain == subdomain.subdomain
+                )
+                existing_result = await db.execute(existing_query)
+                existing_record = existing_result.scalar_one_or_none()
+                
+                if existing_record:
+                    self.logger.debug(f"子域名 {subdomain.subdomain} 已存在，跳过保存")
+                    return
+                
+                # 创建新记录
+                subdomain_record = SubdomainRecord(
+                    task_id=task_id,
+                    subdomain=subdomain.subdomain,
+                    ip_address=subdomain.ip_address,
+                    discovery_method=subdomain.method,
+                    is_accessible=subdomain.is_accessible,
+                    response_code=subdomain.response_code,
+                    response_time=subdomain.response_time,
+                    server_header=subdomain.server_header,
+                    content_type=getattr(subdomain, 'content_type', None),
+                    page_title=getattr(subdomain, 'page_title', None),
+                    created_at=subdomain.discovered_at
+                )
+                db.add(subdomain_record)
+                await db.commit()
+                
+                self.logger.info(f"已保存新发现的子域名: {subdomain.subdomain}")
+                
+        except Exception as e:
+            self.logger.error(f"保存单个子域名结果失败: {e}")
+    
+    async def _update_subdomain_statistics(self, result: ScanExecutionResult):
+        """更新数据库中的子域名统计信息"""
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.task import ScanTask
+            from sqlalchemy import update
+            
+            async with AsyncSessionLocal() as db:
+                stmt = update(ScanTask).where(ScanTask.id == result.task_id).values(
+                    total_subdomains=result.statistics['total_subdomains']
+                )
+                await db.execute(stmt)
+                await db.commit()
+                
+                self.logger.info(f"已更新任务统计信息: 子域名总数 = {result.statistics['total_subdomains']}")
+                
+        except Exception as e:
+            self.logger.error(f"更新子域名统计信息失败: {e}")
     
     async def _save_third_party_domains_results(self, result: ScanExecutionResult):
         """立即保存第三方域名结果到数据库"""
