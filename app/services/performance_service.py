@@ -89,10 +89,35 @@ class PerformanceCollector:
         try:
             # 获取数据库连接池信息
             engine = db.bind
-            pool = engine.pool
             
-            db_active_connections = pool.checkedout()
-            db_total_connections = pool.size()
+            # 尝试从不同的方式获取连接池信息
+            db_active_connections = 0
+            db_total_connections = 0
+            
+            try:
+                # 对于异步引擎，尝试通过sync_engine获取
+                if hasattr(engine, 'sync_engine'):
+                    sync_engine = engine.sync_engine
+                    if hasattr(sync_engine, 'pool'):
+                        pool = sync_engine.pool
+                        checkedout_func = getattr(pool, 'checkedout', None)
+                        if checkedout_func and callable(checkedout_func):
+                            db_active_connections = checkedout_func()
+                        size_func = getattr(pool, 'size', None)
+                        if size_func and callable(size_func):
+                            db_total_connections = size_func()
+                # 对于其他情况，尝试直接访问
+                elif hasattr(engine, 'pool'):
+                    pool = getattr(engine, 'pool', None)
+                    if pool:
+                        checkedout_func = getattr(pool, 'checkedout', None)
+                        if checkedout_func and callable(checkedout_func):
+                            db_active_connections = checkedout_func()
+                        size_func = getattr(pool, 'size', None)
+                        if size_func and callable(size_func):
+                            db_total_connections = size_func()
+            except Exception as pool_error:
+                self.logger.debug(f"无法获取连接池信息: {pool_error}")
             
             # 简单的查询计数统计（实际项目中可以更复杂）
             start_time = time.time()
@@ -112,18 +137,22 @@ class PerformanceCollector:
     async def collect_redis_metrics(self) -> Dict[str, Any]:
         """收集Redis性能指标"""
         try:
-            from app.core.database import redis_client
+            from app.core.cache_manager import cache_manager  # 从正确的模块导入
             
-            if redis_client:
+            # 初始化缓存管理器（如果还未初始化）
+            if not cache_manager.initialized:
+                await cache_manager.initialize()
+            
+            if cache_manager.redis_client:
                 # 检查连接状态
-                redis_connected = 1 if await redis_client.ping() else 0
+                redis_connected = 1 if await cache_manager.redis_client.ping() else 0
                 
                 # 获取Redis信息
-                info = await redis_client.info('memory')
+                info = await cache_manager.redis_client.info('memory')
                 redis_memory_usage_mb = info.get('used_memory', 0) / 1024 / 1024
                 
                 # 获取键数量
-                redis_keys_count = await redis_client.dbsize()
+                redis_keys_count = await cache_manager.redis_client.dbsize()
                 
                 return {
                     'redis_connected': redis_connected,
@@ -151,11 +180,26 @@ class PerformanceCollector:
             from celery import current_app as celery_app
             
             # 获取任务状态统计
-            inspect = celery_app.control.inspect()
-            
-            # 活跃任务
-            active_tasks = inspect.active()
-            celery_active_tasks = sum(len(tasks) for tasks in (active_tasks or {}).values())
+            try:
+                control_inspect = getattr(celery_app.control, 'inspect', None)
+                if control_inspect and callable(control_inspect):
+                    i = control_inspect()
+                    
+                    # 活跃任务
+                    active_func = getattr(i, 'active', None)
+                    if active_func and callable(active_func):
+                        active_tasks = active_func()
+                        if isinstance(active_tasks, dict):
+                            celery_active_tasks = sum(len(tasks) for tasks in active_tasks.values())
+                        else:
+                            celery_active_tasks = 0
+                    else:
+                        celery_active_tasks = 0
+                else:
+                    celery_active_tasks = 0
+            except Exception as celery_error:
+                self.logger.debug(f"无法获取Celery检查器: {celery_error}")
+                celery_active_tasks = 0
             
             # 等待任务（需要额外配置）
             # 这里简化处理，实际项目中可以从Redis或数据库获取
@@ -196,7 +240,7 @@ class PerformanceCollector:
             today = datetime.utcnow().date()
             from app.models.task import ViolationRecord
             violations_query = select(func.count(ViolationRecord.id)).where(
-                func.date(ViolationRecord.created_at) == today
+                func.date(ViolationRecord.detected_at) == today  # 使用detected_at字段
             )
             violations_result = await db.execute(violations_query)
             total_violations = violations_result.scalar() or 0
