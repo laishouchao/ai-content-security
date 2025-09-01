@@ -8,6 +8,7 @@ from .user import User, UserAIConfig
 from .task import ScanTask, TaskLog, ViolationRecord
 from .domain import DomainRecord
 from .system import SystemConfig, UserPermission, LoginAttempt
+from .performance import PerformanceLog, PerformanceAlert
 
 __all__ = [
     "User",
@@ -18,5 +19,7 @@ __all__ = [
     "DomainRecord",
     "SystemConfig",
     "UserPermission",
-    "LoginAttempt"
+    "LoginAttempt",
+    "PerformanceLog",
+    "PerformanceAlert"
 ]

@@ -60,6 +60,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"缓存管理器初始化失败: {e}")
     
+    # 初始化性能监控
+    try:
+        from app.services.performance_service import performance_monitor
+        await performance_monitor.start()
+        logger.info("性能监控服务启动成功")
+    except Exception as e:
+        logger.error(f"性能监控服务启动失败: {e}")
+    
     yield
     
     # 关闭时执行
@@ -91,6 +99,14 @@ async def lifespan(app: FastAPI):
         logger.info("缓存管理器已关闭")
     except Exception as e:
         logger.error(f"缓存管理器关闭失败: {e}")
+    
+    # 停止性能监控
+    try:
+        from app.services.performance_service import performance_monitor
+        await performance_monitor.stop()
+        logger.info("性能监控服务已停止")
+    except Exception as e:
+        logger.error(f"性能监控服务停止失败: {e}")
 
 
 app = FastAPI(

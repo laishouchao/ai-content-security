@@ -96,14 +96,79 @@ class OptimizedScreenshotService:
         
         return self
     
+    async def _init_browser(self):
+        """初始化浏览器和上下文"""
+        try:
+            # 先清理已存在的资源
+            if self.context:
+                try:
+                    await self.context.close()
+                except:
+                    pass
+            if self.browser:
+                try:
+                    await self.browser.close()
+                except:
+                    pass
+            if self.playwright:
+                try:
+                    await self.playwright.stop()
+                except:
+                    pass
+            
+            # 重新初始化
+            self.playwright = await async_playwright().start()
+            
+            self.browser = await self.playwright.chromium.launch(
+                headless=settings.PLAYWRIGHT_HEADLESS,
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--window-size=1920,1080'
+                ]
+            )
+            
+            self.context = await self.browser.new_context(
+                viewport={
+                    'width': settings.SCREENSHOT_VIEWPORT_WIDTH,
+                    'height': settings.SCREENSHOT_VIEWPORT_HEIGHT
+                },
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            )
+            
+            self.logger.info("浏览器重新初始化成功")
+            
+        except Exception as e:
+            self.logger.error(f"重新初始化浏览器失败: {e}")
+            self.context = None
+            self.browser = None
+            self.playwright = None
+    
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器退出"""
+        # 安全关闭浏览器上下文
         if self.context:
-            await self.context.close()
+            try:
+                await self.context.close()
+            except Exception as e:
+                self.logger.debug(f"关闭浏览器上下文时出错（通常可以忽略）: {e}")
+        
+        # 安全关闭浏览器
         if self.browser:
-            await self.browser.close()
+            try:
+                await self.browser.close()
+            except Exception as e:
+                self.logger.debug(f"关闭浏览器时出错（通常可以忽略）: {e}")
+        
+        # 安全停止Playwright
         if self.playwright:
-            await self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            except Exception as e:
+                self.logger.debug(f"停止Playwright时出错（通常可以忽略）: {e}")
     
     async def capture_domains_optimized(
         self, 
@@ -196,7 +261,17 @@ class OptimizedScreenshotService:
             if self.context is None:
                 raise Exception("浏览器上下文未初始化")
             
-            page = await self.context.new_page()
+            # 检查浏览器上下文是否仍然有效
+            try:
+                page = await self.context.new_page()
+            except Exception as e:
+                # 如果上下文已经关闭，重新创建
+                self.logger.warning(f"浏览器上下文不可用，尝试重新初始化: {e}")
+                await self._init_browser()
+                if self.context is None:
+                    raise Exception("无法重新初始化浏览器上下文")
+                page = await self.context.new_page()
+            
             page.set_default_timeout(settings.PLAYWRIGHT_TIMEOUT)
             
             # 访问页面
@@ -287,7 +362,10 @@ class OptimizedScreenshotService:
         
         finally:
             if page:
-                await page.close()
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.debug(f"关闭页面时出错（通常可以忽略）: {e}")
     
     async def _create_analysis_temp_file(self, domain: str, analysis_data: Dict[str, Any]):
         """为AI分析创建临时文件"""

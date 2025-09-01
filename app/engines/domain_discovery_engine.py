@@ -59,7 +59,22 @@ class ContinuousDomainDiscoveryEngine:
         self.target_parts = tldextract.extract(self.target_domain)
         self.target_registered_domain = self.target_parts.registered_domain.lower()
         
+        # 进度回调函数
+        self.progress_callback = None
+        
         self.logger.info(f"初始化持续域名发现引擎: 目标域名={self.target_domain}")
+    
+    def set_progress_callback(self, callback):
+        """设置进度回调函数"""
+        self.progress_callback = callback
+    
+    async def _notify_progress(self, progress: int, message: str):
+        """通知进度更新"""
+        if self.progress_callback:
+            try:
+                await self.progress_callback(progress, message)
+            except Exception as e:
+                self.logger.warning(f"进度回调失败: {e}")
     
     async def start_continuous_discovery(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """开始持续域名发现"""
@@ -71,8 +86,12 @@ class ContinuousDomainDiscoveryEngine:
         try:
             # 1. 初始化：将目标域名添加到域名库
             await self._initialize_target_domain()
+            await self._notify_progress(8, "目标域名初始化完成")
             
             # 2. 持续循环发现和爬取
+            base_progress = 10  # 从10%开始
+            max_progress = 75   # 到75%结束，为AI分析预留空间
+            
             while not self.is_cancelled:
                 discovery_result = await self._execute_discovery_round(config)
                 
@@ -81,8 +100,13 @@ class ContinuousDomainDiscoveryEngine:
                     self.logger.info("✅ 未发现新域名，持续发现完成")
                     break
                 
-                # 检查是否达到最大轮次限制
+                # 根据轮次计算进度
                 max_rounds = config.get('max_discovery_rounds', 20)
+                progress_increment = (max_progress - base_progress) / max_rounds
+                current_progress = min(max_progress, base_progress + (self.current_round * progress_increment))
+                await self._notify_progress(int(current_progress), f"第{self.current_round}轮发现完成，新增{discovery_result['new_domains_found']}个域名")
+                
+                # 检查是否达到最大轮次限制
                 if self.current_round >= max_rounds:
                     self.logger.warning(f"⚠️ 达到最大发现轮次限制 ({max_rounds})，停止发现")
                     break

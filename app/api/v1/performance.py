@@ -477,43 +477,64 @@ async def get_performance_metrics(
         # 为了避免与内置range函数冲突，立即赋值给新变量
         time_range = range
         
-        # 生成模拟的时间序列数据
+        # 从数据库获取真实的性能数据
         from datetime import datetime, timedelta
-        import random
+        from sqlalchemy import select, desc
+        from app.models.performance import PerformanceLog
         
-        # 根据时间范围确定时间间隔和数据点数量
+        # 根据时间范围确定查询范围
         if time_range == "1h":
-            interval_minutes = 5
-            points = 12
+            since_time = datetime.utcnow() - timedelta(hours=1)
+            max_points = 60  # 每分钟一个点
         elif time_range == "6h":
-            interval_minutes = 30
-            points = 12
+            since_time = datetime.utcnow() - timedelta(hours=6)
+            max_points = 72  # 每5分钟一个点
         elif time_range == "24h":
-            interval_minutes = 120
-            points = 12
+            since_time = datetime.utcnow() - timedelta(hours=24)
+            max_points = 144  # 每10分钟一个点
         else:  # 7d
-            interval_minutes = 6 * 60  # 6小时
-            points = 28
+            since_time = datetime.utcnow() - timedelta(days=7)
+            max_points = 168  # 每小时一个点
         
-        # 生成时间戳
-        now = datetime.utcnow()
+        # 查询数据库
+        query = select(PerformanceLog).where(
+            PerformanceLog.timestamp >= since_time
+        ).order_by(PerformanceLog.timestamp).limit(max_points)
+        
+        result = await db.execute(query)
+        logs = result.scalars().all()
+        
+        if not logs:
+            # 如果没有数据，返回空数据集但不错误
+            return {
+                'success': True,
+                'data': {
+                    'timestamps': [],
+                    'cpu': [],
+                    'memory': [],
+                    'disk': [],
+                    'range': time_range,
+                    'message': '暂无性能数据，请稍后再试'
+                }
+            }
+        
+        # 提取数据
         timestamps = []
         cpu_data = []
         memory_data = []
         disk_data = []
         
-        for i in range(points):  # pyright: ignore[reportCallIssue]
-            time_point = now - timedelta(minutes=interval_minutes * (points - 1 - i))
-            timestamps.append(time_point.strftime('%H:%M'))
+        for log in logs:
+            # 格式化时间戳
+            if time_range == "7d":
+                timestamp_str = log.timestamp.strftime('%m-%d %H:%M')
+            else:
+                timestamp_str = log.timestamp.strftime('%H:%M')
             
-            # 生成模拟数据（在实际生产中应该从数据库或监控系统获取）
-            base_cpu = 25 + random.random() * 30  # 25-55%
-            base_memory = 40 + random.random() * 35  # 40-75%
-            base_disk = 60 + random.random() * 20   # 60-80%
-            
-            cpu_data.append(round(base_cpu, 1))
-            memory_data.append(round(base_memory, 1))
-            disk_data.append(round(base_disk, 1))
+            timestamps.append(timestamp_str)
+            cpu_data.append(round(log.cpu_percent or 0, 1))
+            memory_data.append(round(log.memory_percent or 0, 1))
+            disk_data.append(round(log.disk_percent or 0, 1))
         
         return {
             'success': True,
@@ -522,9 +543,157 @@ async def get_performance_metrics(
                 'cpu': cpu_data,
                 'memory': memory_data,
                 'disk': disk_data,
-                'range': time_range
+                'range': time_range,
+                'data_points': len(logs),
+                'latest_update': logs[-1].timestamp.isoformat() if logs else None
             }
         }
     except Exception as e:
         logger.error(f"获取性能指标失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/latest", summary="获取最新性能数据")
+async def get_latest_performance(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取最新的性能数据"""
+    try:
+        from sqlalchemy import select, desc
+        from app.models.performance import PerformanceLog
+        
+        # 获取最新的性能日志
+        query = select(PerformanceLog).order_by(
+            desc(PerformanceLog.timestamp)
+        ).limit(1)
+        
+        result = await db.execute(query)
+        latest_log = result.scalar_one_or_none()
+        
+        if not latest_log:
+            return {
+                'success': True,
+                'data': {
+                    'message': '暂无性能数据',
+                    'timestamp': None
+                }
+            }
+        
+        return {
+            'success': True,
+            'data': latest_log.to_dict()
+        }
+        
+    except Exception as e:
+        logger.error(f"获取最新性能数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/alerts/active", summary="获取活跃的性能告警")
+async def get_active_performance_alerts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取活跃的性能告警"""
+    try:
+        from sqlalchemy import select, desc
+        from app.models.performance import PerformanceAlert
+        
+        # 获取活跃的告警
+        query = select(PerformanceAlert).where(
+            PerformanceAlert.is_active == 1
+        ).order_by(desc(PerformanceAlert.triggered_at))
+        
+        result = await db.execute(query)
+        alerts = result.scalars().all()
+        
+        return {
+            'success': True,
+            'data': {
+                'alerts': [alert.to_dict() for alert in alerts],
+                'count': len(alerts)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取性能告警失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/alerts/{alert_id}/resolve", summary="手动解决告警")
+async def resolve_performance_alert(
+    alert_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """手动解决性能告警"""
+    try:
+        from sqlalchemy import select
+        from app.models.performance import PerformanceAlert
+        
+        # 查找告警
+        query = select(PerformanceAlert).where(
+            PerformanceAlert.id == alert_id
+        )
+        result = await db.execute(query)
+        alert = result.scalar_one_or_none()
+        
+        if not alert:
+            raise HTTPException(
+                status_code=404, 
+                detail="告警不存在"
+            )
+        
+        if alert.is_active == 0:
+            return {
+                'success': True,
+                'data': {
+                    'message': '告警已经被解决',
+                    'alert_id': alert_id
+                }
+            }
+        
+        # 解决告警
+        alert.is_active = 0
+        alert.resolved_at = datetime.utcnow()
+        await db.commit()
+        
+        return {
+            'success': True,
+            'data': {
+                'message': '告警已解决',
+                'alert_id': alert_id,
+                'resolved_at': alert.resolved_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"解决性能告警失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/collect", summary="手动触发性能数据收集")
+async def trigger_performance_collection(
+    current_user: User = Depends(get_current_user)
+):
+    """手动触发性能数据收集"""
+    try:
+        from app.tasks.performance_tasks import trigger_performance_collection
+        
+        # 触发异步任务
+        task = trigger_performance_collection()
+        
+        return {
+            'success': True,
+            'data': {
+                'message': '性能数据收集任务已触发',
+                'task_id': task.id
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"触发性能数据收集失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

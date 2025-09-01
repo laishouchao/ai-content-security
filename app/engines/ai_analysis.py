@@ -319,15 +319,14 @@ class AIAnalysisEngine:
         return violations
     
     async def _save_analysis_result_to_cache(self, domain: DomainRecord, result: AIAnalysisResult):
-        """保存AI分析结果到缓存"""
+        """保存AI分析结果到缓存（已禁用第三方缓存库）"""
         try:
             from app.core.database import AsyncSessionLocal
-            from app.models.third_party_cache import ThirdPartyDomainCache
-            from sqlalchemy import select, update
+            from sqlalchemy import update
             from datetime import datetime
             
             async with AsyncSessionLocal() as db:
-                # 更新任务中的域名记录
+                # 只更新任务中的域名记录
                 update_stmt = update(DomainRecord).where(
                     DomainRecord.id == domain.id
                 ).values(
@@ -343,31 +342,6 @@ class AIAnalysisEngine:
                     }
                 )
                 await db.execute(update_stmt)
-                
-                # 同时更新缓存库中的记录
-                cache_stmt = select(ThirdPartyDomainCache).where(
-                    ThirdPartyDomainCache.domain == str(domain.domain)
-                )
-                cache_result = await db.execute(cache_stmt)
-                cache_record = cache_result.scalar_one_or_none()
-                
-                if cache_record:
-                    update_cache_stmt = update(ThirdPartyDomainCache).where(
-                        ThirdPartyDomainCache.id == cache_record.id
-                    ).values(
-                        last_analysis_result={
-                            "has_violation": result.has_violation,
-                            "violation_types": result.violation_types,
-                            "confidence_score": result.confidence_score,
-                            "risk_level": result.risk_level,
-                            "title": result.title,
-                            "description": result.description,
-                            "analysis_duration": result.analysis_duration
-                        },
-                        last_analyzed_at=datetime.utcnow()
-                    )
-                    await db.execute(update_cache_stmt)
-                
                 await db.commit()
                 
         except Exception as e:

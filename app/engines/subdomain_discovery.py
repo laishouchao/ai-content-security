@@ -399,6 +399,68 @@ class SubdomainDiscoveryEngine:
             CertificateTransparencyMethod(),
             BruteForceMethod()
         ]
+        
+        # 进度回调函数
+        self.progress_callback = None
+        self.database_sync_callback = None
+    
+    def set_progress_callback(self, callback):
+        """设置进度回调函数"""
+        self.progress_callback = callback
+    
+    def set_database_sync_callback(self, callback):
+        """设置数据库同步回调函数"""
+        self.database_sync_callback = callback
+    
+    async def _notify_progress(self, progress: int, message: str, data: dict = None):  # pyright: ignore[reportArgumentType]
+        """通知进度更新"""
+        self.logger.info(f"进度更新: {progress}% - {message}")
+        
+        # 记录详细日志到数据库
+        await self._log_to_database("INFO", "subdomain_discovery", message, data)
+        
+        if self.progress_callback:
+            try:
+                await self.progress_callback(progress, message)
+            except Exception as e:
+                self.logger.warning(f"进度回调失败: {e}")
+                
+        # 同步数据到数据库
+        if self.database_sync_callback and data:
+            try:
+                await self.database_sync_callback(data)
+            except Exception as e:
+                self.logger.warning(f"数据库同步失败: {e}")
+    
+    async def _log_to_database(self, level: str, module: str, message: str, extra_data: dict = None):  # pyright: ignore[reportArgumentType]
+        """记录日志到数据库"""
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.task import TaskLog
+            from datetime import datetime
+            from sqlalchemy.exc import IntegrityError
+            
+            async with AsyncSessionLocal() as db:
+                task_log = TaskLog(
+                    task_id=self.task_id,
+                    level=level.upper(),
+                    module=module,
+                    message=message,
+                    extra_data=extra_data,
+                    created_at=datetime.utcnow()
+                )
+                
+                db.add(task_log)
+                await db.commit()
+                
+        except IntegrityError as e:
+            # 外键约束错误，通常是测试环境中任务ID不存在，跳过数据库日志记录
+            if "ForeignKeyViolationError" in str(e) or "task_logs_task_id_fkey" in str(e):
+                self.logger.debug(f"任务ID {self.task_id} 不存在于scan_tasks表中，跳过数据库日志记录")
+            else:
+                self.logger.warning(f"数据库完整性错误: {e}")
+        except Exception as e:
+            self.logger.warning(f"记录日志到数据库失败: {e}")
     
     async def discover_all(self, domain: str, config: Dict[str, Any]) -> List[SubdomainResult]:
         """使用所有方法发现子域名"""
@@ -408,43 +470,85 @@ class SubdomainDiscoveryEngine:
         all_results = set()
         max_subdomains = config.get('max_subdomains', settings.MAX_SUBDOMAINS_PER_TASK)
         
+        # 通知开始发现
+        await self._notify_progress(6, f"开始子域名发现: {domain}")
+        
         # 并发执行所有发现方法
         tasks = []
+        step_progress = 6  # 从6%开始
         
         # DNS查询
         if config.get('subdomain_discovery', {}).get('dns_query_enabled', True):
-            tasks.append(self.methods[0].discover(domain, self.logger))
+            tasks.append(('DNS查询', self.methods[0].discover(domain, self.logger)))
         
         # 证书透明日志
         if config.get('subdomain_discovery', {}).get('certificate_transparency_enabled', True):
-            tasks.append(self.methods[1].discover(domain, self.logger))
+            tasks.append(('证书透明日志', self.methods[1].discover(domain, self.logger)))
         
         # 字典爆破
         if config.get('subdomain_discovery', {}).get('bruteforce_enabled', True):
             max_brute = min(max_subdomains // 2, 200)  # 限制爆破数量
-            tasks.append(self.methods[2].discover(domain, self.logger, max_brute))
+            tasks.append(('字典爆破', self.methods[2].discover(domain, self.logger, max_brute)))
         
-        # 执行所有发现任务
-        discovery_results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 合并结果
-        for results in discovery_results:
-            if isinstance(results, list):
-                for result in results:
-                    all_results.add(result)
-                    if len(all_results) >= max_subdomains:
-                        break
-            elif isinstance(results, Exception):
-                self.logger.error(f"子域名发现异常: {results}")
+        # 按顺序执行各个发现任务，每个完成后更新进度
+        for i, (method_name, task) in enumerate(tasks):
+            try:
+                step_progress = 6 + (i + 1) * 3  # 6%, 9%, 12%
+                await self._notify_progress(step_progress, f"正在执行{method_name}...")
+                
+                results = await task
+                
+                if isinstance(results, list):
+                    new_count = 0
+                    for result in results:
+                        if result not in all_results:
+                            all_results.add(result)
+                            new_count += 1
+                        if len(all_results) >= max_subdomains:
+                            break
+                    
+                    self.logger.info(f"{method_name}发现 {new_count} 个子域名")
+                    
+                    # 实时同步数据到数据库
+                    if new_count > 0:
+                        await self._notify_progress(
+                            step_progress, 
+                            f"{method_name}完成，发现 {new_count} 个新子域名",
+                            {
+                                'method': method_name,
+                                'discovered_count': new_count,
+                                'total_discovered': len(all_results),
+                                'new_subdomains': [r.subdomain for r in results if r not in all_results][:10]
+                            }
+                        )
+                    
+                elif isinstance(results, Exception):
+                    self.logger.error(f"{method_name}发现异常: {results}")
+                    
+            except Exception as e:
+                self.logger.error(f"{method_name}执行失败: {e}")
         
         # 转换为列表并限制数量
         final_results = list(all_results)[:max_subdomains]
+        
+        await self._notify_progress(15, f"发现阶段完成，共发现 {len(final_results)} 个子域名")
         
         # 验证子域名可访问性
         if config.get('subdomain_discovery', {}).get('verify_accessibility', True):
             final_results = await self._verify_accessibility(final_results)
         
         duration = time.time() - start_time
+        await self._notify_progress(
+            20, 
+            f"子域名发现全部完成，耗时 {duration:.2f} 秒",
+            {
+                'total_discovered': len(final_results),
+                'accessible_count': sum(1 for r in final_results if r.is_accessible),
+                'duration': duration,
+                'accessible_subdomains': [r.subdomain for r in final_results if r.is_accessible][:10]
+            }
+        )
+        
         self.logger.info(f"子域名发现完成: 发现 {len(final_results)} 个子域名，耗时 {duration:.2f} 秒")
         
         return final_results
@@ -455,6 +559,7 @@ class SubdomainDiscoveryEngine:
             return results
             
         self.logger.info(f"开始验证 {len(results)} 个子域名的可访问性")
+        await self._notify_progress(16, f"开始验证 {len(results)} 个子域名的可访问性")
         
         # 降低并发数，避免网络拥塞
         semaphore = asyncio.Semaphore(5)  # 从20降低到5
@@ -470,11 +575,18 @@ class SubdomainDiscoveryEngine:
                     # 每处理5个或在最后输出进度
                     if completed_count % 5 == 0 or completed_count == len(results):
                         accessible_so_far = sum(1 for r in results[:completed_count] if r.is_accessible)
-                        self.logger.info(
-                            f"可访问性验证进度: {completed_count}/{len(results)}, "
-                            f"已发现可访问: {accessible_so_far}"
+                        progress = 16 + int((completed_count / len(results)) * 4)  # 16% - 20%
+                        
+                        await self._notify_progress(
+                            progress,
+                            f"可访问性验证进度: {completed_count}/{len(results)}, 已发现可访问: {accessible_so_far}",
+                            {
+                                'completed': completed_count,
+                                'total': len(results),
+                                'accessible_count': accessible_so_far,
+                                'verification_stage': 'accessibility'
+                            }
                         )
-                    
                     return result
                 except Exception as e:
                     self.logger.warning(f"验证子域名可访问性时出错 {result.subdomain}: {e}")

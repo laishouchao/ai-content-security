@@ -530,37 +530,35 @@ class ParallelScanExecutor:
         """判断是否需要AI分析"""
         self.logger.debug(f"🔍 开始分析检查: {content_result.url}")
         
-        # 检查截图文件
+        # 根据AI分析配置规则，确保100%的AI分析覆盖率
+        # 不跳过任何内容，即使没有截图也要进行AI分析
+        
+        # 检查截图文件（仅用于日志记录）
         if not content_result.screenshot_path:
-            self.logger.warning(f"⚠️ 没有截图路径: {content_result.url}")
-            return False, "no_screenshot"
-        
-        self.logger.debug(f"🖼️ 截图路径: {content_result.screenshot_path}")
-        
-        # 检查文件大小
-        try:
-            import os
-            if not os.path.exists(content_result.screenshot_path):
-                self.logger.warning(f"⚠️ 截图文件不存在: {content_result.screenshot_path}")
-                return False, "screenshot_file_not_exists"
-                
-            file_size = os.path.getsize(content_result.screenshot_path)
-            self.logger.debug(f"📄 截图文件大小: {file_size} bytes")
+            self.logger.info(f"⚠️ 没有截图路径，但仍然进行AI分析: {content_result.url}")
+        else:
+            self.logger.debug(f"🖼️ 截图路径: {content_result.screenshot_path}")
             
-            if file_size < 1024:  # 小于1KB，可能是空截图
-                self.logger.warning(f"⚠️ 截图文件太小: {file_size} bytes < 1KB")
-                return False, "screenshot_too_small"
-        except Exception as e:
-            self.logger.error(f"❌ 检查截图文件失败: {e}")
-            return False, "screenshot_file_error"
+            # 检查文件大小（仅用于日志记录）
+            try:
+                import os
+                if not os.path.exists(content_result.screenshot_path):
+                    self.logger.info(f"⚠️ 截图文件不存在，但仍然进行AI分析: {content_result.screenshot_path}")
+                else:
+                    file_size = os.path.getsize(content_result.screenshot_path)
+                    self.logger.debug(f"📄 截图文件大小: {file_size} bytes")
+                    
+                    if file_size < 1024:  # 小于1KB
+                        self.logger.info(f"⚠️ 截图文件较小，但仍然进行AI分析: {file_size} bytes")
+            except Exception as e:
+                self.logger.info(f"⚠️ 检查截图文件出错，但仍然进行AI分析: {e}")
         
-        # 检查状态码
+        # 检查状态码（仅用于日志记录）
         if hasattr(content_result, 'status_code') and content_result.status_code is not None and content_result.status_code >= 400:
-            self.logger.info(f"⚠️ 错误状态码: {content_result.status_code}")
-            return False, "error_status_code"
+            self.logger.info(f"⚠️ 错误状态码，但仍然进行AI分析: {content_result.status_code}")
         
-        # 对所有有效内容进行AI分析
-        self.logger.info(f"✅ 对所有内容进行AI分析: {content_result.url}")
+        # 根据AI分析配置规则，对所有内容进行AI分析，不跳过任何内容
+        self.logger.info(f"✅ 对所有内容进行AI分析（100%覆盖率）: {content_result.url}")
         return True, "analyze_all_content"
     
     async def _perform_ai_analysis(self, content_result: ContentResult, config: Dict[str, Any]) -> List[ViolationRecord]:

@@ -109,7 +109,10 @@ class ScanTaskExecutor:
             self.domain_discovery_engine.target_parts = tldextract.extract(target_domain)
             self.domain_discovery_engine.target_registered_domain = self.domain_discovery_engine.target_parts.registered_domain.lower()
             
-            # 新的统一流程：循环域名发现和爬取 (0-80%)
+            # 任务真正开始执行，更新进度为1%
+            await self._update_progress(result, 1, "扫描任务已开始")
+            
+            # 新的统一流程：循环域名发现和爬取 (1-80%)
             if not self.is_cancelled and config.get('continuous_discovery_enabled', True):
                 await self._execute_continuous_domain_discovery(result, config)
                 await self._update_progress(result, 80, f"循环域名发现完成: {result.statistics.get('total_domains', 0)} 个域名")
@@ -149,6 +152,18 @@ class ScanTaskExecutor:
         try:
             self.logger.info("开始子域名发现阶段")
             
+            # 为子域名发现引擎设置进度回调
+            async def subdomain_progress_callback(progress: int, message: str):
+                await self._update_progress(result, progress, message)
+                
+            async def subdomain_database_sync_callback(data: dict):
+                # 实时同步子域名数据到数据库
+                if 'new_subdomains' in data:
+                    await self._sync_subdomains_to_database(data['new_subdomains'])
+                    
+            self.subdomain_engine.set_progress_callback(subdomain_progress_callback)
+            self.subdomain_engine.set_database_sync_callback(subdomain_database_sync_callback)
+            
             subdomains = await self.subdomain_engine.discover_all(result.target_domain, config)
             result.subdomains = subdomains
             
@@ -171,6 +186,15 @@ class ScanTaskExecutor:
         """执行循环域名发现"""
         try:
             self.logger.info("开始循环域名发现阶段")
+            
+            # 更新进度为5% - 初步子域名发现开始
+            await self._update_progress(result, 5, "初步子域名发现")
+            
+            # 为域名发现引擎设置进度回调
+            async def discovery_progress_callback(progress: int, message: str):
+                await self._update_progress(result, progress, message)
+            
+            self.domain_discovery_engine.set_progress_callback(discovery_progress_callback)
             
             # 执行循环发现
             discovery_stats = await self.domain_discovery_engine.start_continuous_discovery(config)
@@ -1043,6 +1067,43 @@ class ScanTaskExecutor:
                 
         except Exception as e:
             self.logger.error(f"更新子域名统计信息失败: {e}")
+    
+    async def _sync_subdomains_to_database(self, subdomain_names: list):
+        """实时同步子域名到数据库"""
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.domain import DomainRecord, DomainCategory, DomainStatus
+            from sqlalchemy import select
+            
+            async with AsyncSessionLocal() as db:
+                for subdomain_name in subdomain_names:
+                    # 检查是否已存在
+                    existing_query = select(DomainRecord).where(
+                        DomainRecord.task_id == self.task_id,
+                        DomainRecord.domain == subdomain_name
+                    )
+                    result = await db.execute(existing_query)
+                    existing = result.scalar_one_or_none()
+                    
+                    if not existing:
+                        # 创建新的子域名记录
+                        domain_record = DomainRecord(
+                            task_id=self.task_id,
+                            domain=subdomain_name,
+                            category=DomainCategory.TARGET_SUBDOMAIN,
+                            status=DomainStatus.DISCOVERED,
+                            discovery_method='subdomain_discovery',
+                            depth_level=1,
+                            confidence_score=0.9,
+                            tags=['subdomain', 'discovered']
+                        )
+                        db.add(domain_record)
+                        
+                await db.commit()
+                self.logger.debug(f"实时同步了 {len(subdomain_names)} 个子域名到数据库")
+                
+        except Exception as e:
+            self.logger.warning(f"实时同步子域名失败: {e}")
     
     async def _save_domain_records_results(self, result: ScanExecutionResult):
         """立即保存第三方域名结果到数据库"""

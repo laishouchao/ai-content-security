@@ -213,7 +213,29 @@ celery_app.autodiscover_tasks([
     "app.tasks.scan_tasks",
     "app.tasks.analysis_tasks", 
     "app.tasks.capture_tasks",
+    "app.tasks.performance_tasks",  # 添加性能任务模块
 ])
+
+# 添加定时任务配置
+from celery.schedules import crontab
+
+celery_app.conf.beat_schedule = {
+    # 每分钟收集性能数据
+    'collect-performance-metrics': {
+        'task': 'app.tasks.performance_tasks.collect_performance_metrics',
+        'schedule': crontab(minute='*'),  # 每分钟执行
+    },
+    # 每小时清理过期性能日志
+    'cleanup-old-performance-logs': {
+        'task': 'app.tasks.performance_tasks.cleanup_old_performance_logs',
+        'schedule': crontab(minute=0),  # 每小时执行
+    },
+    # 每15分钟检查和解决告警
+    'check-and-resolve-alerts': {
+        'task': 'app.tasks.performance_tasks.check_and_resolve_alerts',
+        'schedule': crontab(minute='*/15'),  # 每15分钟执行
+    },
+}
 
 if __name__ == "__main__":
     logger.info("=" * 60)

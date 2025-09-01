@@ -124,6 +124,67 @@ def scan_domain_task(self, task_id: str, user_id: str, target_domain: str, confi
         loop.close()
 
 
+async def _handle_parallel_executor_progress(event, task_id: str):
+    """处理并行执行器的进度事件，转换为数据库进度更新"""
+    try:
+        from app.core.database import get_db_session
+        
+        event_type = event.event_type
+        stage = event.stage
+        data = event.data or {}
+        
+        # 根据事件类型计算进度百分比
+        progress = 0
+        message = ""
+        
+        if stage == 'discovery' and event_type == 'stage_started':
+            progress = 5
+            message = "开始子域名发现"
+        elif stage == 'discovery' and event_type == 'subdomains_discovered':
+            count = data.get('count', 0)
+            progress = 20
+            message = f"子域名发现完成，发现 {count} 个子域名"
+        elif stage == 'crawling' and event_type == 'stage_started':
+            progress = 25
+            message = "开始链接爬取"
+        elif stage == 'crawling' and event_type == 'subdomain_crawled':
+            total_crawled = data.get('total_crawled', 0)
+            progress = min(25 + total_crawled * 5, 60)  # 25%-60%
+            message = f"爬取进度: 已完成 {total_crawled} 个子域名"
+        elif stage == 'crawling' and event_type == 'stage_completed':
+            progress = 60
+            message = "链接爬取完成"
+        elif stage == 'analysis' and event_type == 'stage_started':
+            progress = 65
+            message = "开始AI分析"
+        elif stage == 'analysis' and event_type == 'domain_analyzed':
+            analyzed_count = data.get('analyzed_count', 0)
+            progress = min(65 + analyzed_count * 2, 95)  # 65%-95%
+            message = f"AI分析进度: 已分析 {analyzed_count} 个域名"
+        elif stage == 'analysis' and event_type == 'scan_completed':
+            progress = 100
+            message = "扫描任务完成"
+        elif event_type == 'scan_failed':
+            progress = -1  # 特殊标记，表示失败
+            message = f"扫描任务失败: {data.get('error', '未知错误')}"
+        
+        # 只在有意义的进度更新时才更新数据库
+        if progress > 0 or progress == -1:
+            async with get_db_session() as db:
+                if progress == -1:
+                    await _update_task_status(db, task_id, TaskStatus.FAILED, 0, message)
+                else:
+                    await _update_task_status(db, task_id, TaskStatus.RUNNING, progress, message)
+                    
+                # 记录进度日志
+                await _log_task_event(db, task_id, "INFO", "progress", message)
+                
+    except Exception as e:
+        # 不抛出异常，避免影响主任务执行
+        logger = TaskLogger(task_id, "system")
+        logger.warning(f"处理并行执行器进度事件失败: {e}")
+
+
 async def _execute_scan_task(
     task_id: str, 
     user_id: str, 
@@ -156,6 +217,9 @@ async def _execute_scan_task(
                 executor = ScanTaskExecutor(task_id, user_id)
                 logger.info("使用传统扫描执行器")
             
+            # 任务真正开始执行，更新进度为1%
+            await _update_task_status(db, task_id, TaskStatus.RUNNING, 1, "扫描任务已开始")
+            
             # 设置进度回调（仅对传统执行器）
             if isinstance(executor, ScanTaskExecutor):
                 async def progress_callback(task_id: str, progress: int, message: str):
@@ -175,6 +239,12 @@ async def _execute_scan_task(
                 async def event_handler(event):
                     # 将事件转发到WebSocket
                     await monitor.notify_task_event(task_id, user_id, event.to_dict())
+                    
+                    # 🔧 关键修复：根据事件类型更新数据库进度
+                    try:
+                        await _handle_parallel_executor_progress(event, task_id)
+                    except Exception as e:
+                        logger.warning(f"处理并行执行器进度事件失败: {e}")
                 
                 executor.event_store.subscribe(event_handler)
             
@@ -252,7 +322,7 @@ async def _update_task_status(
         }
         
         # 根据状态设置时间戳
-        if status == TaskStatus.RUNNING and progress == 0:
+        if status == TaskStatus.RUNNING and progress <= 1:  # 任务开始时
             update_data['started_at'] = datetime.utcnow()
         elif status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
             update_data['completed_at'] = datetime.utcnow()

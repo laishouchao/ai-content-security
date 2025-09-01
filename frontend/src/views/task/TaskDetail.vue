@@ -54,53 +54,49 @@
         </div>
       </template>
       
-      <el-row :gutter="20">
-        <el-col :span="18">
-          <el-descriptions :column="3" border>
-            <el-descriptions-item label="目标域名">
-              <span class="domain-name">{{ task.target_domain }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="任务状态">
-              <el-tag :type="getStatusType(task.status)" size="small">
-                {{ getStatusText(task.status) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="执行进度">
-              <el-progress :percentage="task.progress || 0" />
-            </el-descriptions-item>
-            <el-descriptions-item label="创建时间">
-              {{ task.created_at ? formatTime(task.created_at) : '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="开始时间">
-              {{ task.started_at ? formatTime(task.started_at) : '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="完成时间">
-              {{ task.completed_at ? formatTime(task.completed_at) : '-' }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </el-col>
-        <el-col :span="6">
-          <!-- 实时统计 -->
-          <div class="stats-summary">
-            <div class="stat-item">
-              <div class="stat-value">{{ domainStats.total_domains || 0 }}</div>
-              <div class="stat-label">发现域名总数</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ domainStats.accessible_count || 0 }}</div>
-              <div class="stat-label">可访问域名</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ domainStats.violation_count || 0 }}</div>
-              <div class="stat-label">违规域名</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value">{{ task.total_pages_crawled || 0 }}</div>
-              <div class="stat-label">爬取页面</div>
-            </div>
-          </div>
-        </el-col>
-      </el-row>
+      <el-descriptions :column="3" border>
+        <el-descriptions-item label="目标域名">
+          <span class="domain-name">{{ task.target_domain }}</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="任务状态">
+          <el-tag :type="getStatusType(task.status)" size="small">
+            {{ getStatusText(task.status) }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="执行进度">
+          <el-progress :percentage="task.progress || 0" />
+        </el-descriptions-item>
+        
+        <el-descriptions-item label="发现域名总数">
+          <el-tag type="info" size="small">{{ domainStats.total_domains || 0 }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="可访问域名">
+          <el-tag type="success" size="small">{{ domainStats.accessible_count || 0 }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="违规域名">
+          <el-tag type="danger" size="small">{{ domainStats.violation_count || 0 }}</el-tag>
+        </el-descriptions-item>
+        
+        <el-descriptions-item label="爬取页面">
+          <el-tag type="warning" size="small">{{ task.total_pages_crawled || 0 }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="创建时间">
+          {{ task.created_at ? formatTime(task.created_at) : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="开始时间">
+          {{ task.started_at ? formatTime(task.started_at) : '-' }}
+        </el-descriptions-item>
+        
+        <el-descriptions-item label="子域名发现">
+          <el-tag type="primary" size="small">{{ domainStats.subdomain_count || 0 }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="第三方域名">
+          <el-tag type="primary" size="small">{{ domainStats.third_party_count || 0 }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="完成时间">
+          {{ task.completed_at ? formatTime(task.completed_at) : '-' }}
+        </el-descriptions-item>
+      </el-descriptions>
     </el-card>
 
     <!-- 主要内容选项卡 -->
@@ -316,6 +312,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Close, Refresh, Delete, Search } from '@element-plus/icons-vue'
 import { taskAPI, type Task } from '@/api/task'
+import http from '@/api/http'
 import type { SubdomainRecord, ViolationRecord, TaskLog, ThirdPartyDomain } from '@/types/api'
 
 const route = useRoute()
@@ -632,19 +629,18 @@ const getDiscoveryMethodText = (method: string) => {
 const fetchScanDomains = async () => {
   try {
     scanDomainsLoading.value = true
-    const response = await fetch(`/api/v1/tasks/${taskId}/scan-domains?${new URLSearchParams({
-      skip: String((scanDomainPagination.value.page - 1) * scanDomainPagination.value.size),
-      limit: String(scanDomainPagination.value.size),
-      ...(scanDomainFilters.value.status && { status: scanDomainFilters.value.status }),
-      ...(scanDomainFilters.value.category && { category: scanDomainFilters.value.category }),
-      ...(scanDomainFilters.value.search && { search: scanDomainFilters.value.search })
-    })}`)
-    
-    if (response.ok) {
-      const data = await response.json()
-      if (data.success) {
-        scanDomains.value = data.data.items || []
+    const response = await http.get(`/tasks/${taskId}/scan-domains`, {
+      params: {
+        skip: (scanDomainPagination.value.page - 1) * scanDomainPagination.value.size,
+        limit: scanDomainPagination.value.size,
+        ...(scanDomainFilters.value.status && { status: scanDomainFilters.value.status }),
+        ...(scanDomainFilters.value.category && { category: scanDomainFilters.value.category }),
+        ...(scanDomainFilters.value.search && { search: scanDomainFilters.value.search })
       }
+    })
+    
+    if (response.data && response.data.success) {
+      scanDomains.value = response.data.data.items || []
     }
   } catch (error) {
     console.error('获取扫描域名失败:', error)
@@ -657,19 +653,18 @@ const fetchScanDomains = async () => {
 const fetchAllDomains = async () => {
   try {
     allDomainsLoading.value = true
-    const response = await fetch(`/api/v1/tasks/${taskId}/all-domains?${new URLSearchParams({
-      skip: String((allDomainPagination.value.page - 1) * allDomainPagination.value.size),
-      limit: String(allDomainPagination.value.size),
-      ...(allDomainFilters.value.category && { category: allDomainFilters.value.category }),
-      ...(allDomainFilters.value.risk_level && { risk_level: allDomainFilters.value.risk_level }),
-      ...(allDomainFilters.value.search && { search: allDomainFilters.value.search })
-    })}`)
-    
-    if (response.ok) {
-      const data = await response.json()
-      if (data.success) {
-        allDomains.value = data.data.items || []
+    const response = await http.get(`/tasks/${taskId}/all-domains`, {
+      params: {
+        skip: (allDomainPagination.value.page - 1) * allDomainPagination.value.size,
+        limit: allDomainPagination.value.size,
+        ...(allDomainFilters.value.category && { category: allDomainFilters.value.category }),
+        ...(allDomainFilters.value.risk_level && { risk_level: allDomainFilters.value.risk_level }),
+        ...(allDomainFilters.value.search && { search: allDomainFilters.value.search })
       }
+    })
+    
+    if (response.data && response.data.success) {
+      allDomains.value = response.data.data.items || []
     }
   } catch (error) {
     console.error('获取所有域名失败:', error)
@@ -958,32 +953,6 @@ onMounted(() => {
 .domain-name {
   font-weight: 500;
   color: #409eff;
-}
-
-/* 统计卡片样式 */
-.stats-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  color: white;
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: bold;
-  margin-bottom: 4px;
-}
-
-.stat-label {
-  font-size: 12px;
-  opacity: 0.9;
 }
 
 /* 选项卡内容样式 */

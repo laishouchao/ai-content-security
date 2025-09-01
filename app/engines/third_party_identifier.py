@@ -295,42 +295,24 @@ class ThirdPartyIdentifierEngine:
             domain = domain_info['domain']
             found_urls = domain_info['found_on_urls']
             
-            # 检查缓存库
-            cached_result = await self._check_domain_cache(domain)
-            if cached_result:
-                # 使用缓存库结果
-                result = ThirdPartyDomainResult(
-                    domain=domain,
-                    domain_type=cached_result.domain_type,
-                    risk_level=cached_result.risk_level,
-                    found_on_urls=found_urls,
-                    confidence_score=0.95,  # 缓存库结果置信度更高
-                    description=f"使用缓存库分析结果 - {cached_result.page_description or cached_result.domain_type}",
-                    category_tags=[cached_result.domain_type, "cached", "from_cache_library"]
-                )
-                self.logger.info(f"使用缓存库结果: {domain}")
-            else:
-                # 分类域名
-                domain_type, risk_level, confidence = self.classifier.classify_domain(
-                    domain, {'found_urls': found_urls}
-                )
-                
-                # 生成描述和标签
-                description = self._generate_description(domain, domain_type, risk_level)
-                tags = self._generate_tags(domain, domain_type, found_urls)
-                
-                result = ThirdPartyDomainResult(
-                    domain=domain,
-                    domain_type=domain_type,
-                    risk_level=risk_level,
-                    found_on_urls=found_urls,
-                    confidence_score=confidence,
-                    description=description,
-                    category_tags=tags
-                )
-                
-                # 保存到缓存库
-                await self._save_to_domain_cache(domain, result)
+            # 直接分类域名（禁用缓存功能）
+            domain_type, risk_level, confidence = self.classifier.classify_domain(
+                domain, {'found_urls': found_urls}
+            )
+            
+            # 生成描述和标签
+            description = self._generate_description(domain, domain_type, risk_level)
+            tags = self._generate_tags(domain, domain_type, found_urls)
+            
+            result = ThirdPartyDomainResult(
+                domain=domain,
+                domain_type=domain_type,
+                risk_level=risk_level,
+                found_on_urls=found_urls,
+                confidence_score=confidence,
+                description=description,
+                category_tags=tags
+            )
             
             results.append(result)
         
@@ -544,95 +526,15 @@ class ThirdPartyIdentifierEngine:
         }
         return priority_map.get(risk_level, 0)
     
-    async def _check_domain_cache(self, domain: str) -> Optional[Any]:
-        """检查第三方域名缓存库"""
-        try:
-            from app.core.database import AsyncSessionLocal
-            from app.models.third_party_cache import ThirdPartyDomainCache
-            from sqlalchemy import select
-            from datetime import datetime, timedelta
-            
-            async with AsyncSessionLocal() as db:
-                # 计算7天前的时间
-                seven_days_ago = datetime.utcnow() - timedelta(days=7)
-                
-                # 查找缓存的域名信息，并同时检查是否在7天内更新过
-                stmt = select(ThirdPartyDomainCache).where(
-                    ThirdPartyDomainCache.domain == domain
-                ).where(
-                    ThirdPartyDomainCache.last_identified_at >= seven_days_ago
-                )
-                
-                result = await db.execute(stmt)
-                cached_domain = result.scalar_one_or_none()
-                
-                if cached_domain:
-                    self.logger.debug(f"找到缓存库中的域名信息: {domain}")
-                    return cached_domain
-                else:
-                    # 检查是否存在但已过期的记录
-                    stmt_check = select(ThirdPartyDomainCache).where(
-                        ThirdPartyDomainCache.domain == domain
-                    )
-                    result_check = await db.execute(stmt_check)
-                    existing_domain = result_check.scalar_one_or_none()
-                    
-                    if existing_domain:
-                        self.logger.debug(f"缓存库中的域名信息已过期: {domain}")
-                    
-        except Exception as e:
-            self.logger.warning(f"检查域名缓存库失败: {e}")
-        
-        return None
+    # async def _check_domain_cache(self, domain: str) -> Optional[Any]:
+    #     """检查第三方域名缓存库（已禁用）"""
+    #     # 缓存功能已禁用，直接返回None
+    #     return None
     
-    async def _save_to_domain_cache(self, domain: str, result: ThirdPartyDomainResult):
-        """保存域名信息到缓存库"""
-        try:
-            from app.core.database import AsyncSessionLocal
-            from app.models.third_party_cache import ThirdPartyDomainCache
-            from sqlalchemy import select, update
-            from datetime import datetime
-            
-            async with AsyncSessionLocal() as db:
-                # 检查是否已存在
-                stmt = select(ThirdPartyDomainCache).where(
-                    ThirdPartyDomainCache.domain == domain
-                )
-                
-                db_result = await db.execute(stmt)
-                existing_cache = db_result.scalar_one_or_none()
-                
-                if existing_cache:
-                    # 更新现有记录
-                    update_stmt = update(ThirdPartyDomainCache).where(
-                        ThirdPartyDomainCache.id == existing_cache.id
-                    ).values(
-                        domain_type=result.domain_type,
-                        risk_level=result.risk_level,
-                        page_title=result.description[:500] if result.description else None,
-                        page_description=result.description[:1000] if result.description else None,
-                        identification_count=existing_cache.identification_count + 1,
-                        last_identified_at=datetime.utcnow()
-                    )
-                    await db.execute(update_stmt)
-                else:
-                    # 创建新记录
-                    cache_record = ThirdPartyDomainCache(
-                        domain=domain,
-                        domain_type=result.domain_type,
-                        risk_level=result.risk_level,
-                        page_title=result.description[:500] if result.description else None,
-                        page_description=result.description[:1000] if result.description else None,
-                        identification_count=1,
-                        first_identified_at=datetime.utcnow(),
-                        last_identified_at=datetime.utcnow()
-                    )
-                    db.add(cache_record)
-                
-                await db.commit()
-                
-        except Exception as e:
-            self.logger.warning(f"保存域名到缓存库失败: {e}")
+    # async def _save_to_domain_cache(self, domain: str, result: ThirdPartyDomainResult):
+    #     """保存域名信息到缓存库（已禁用）"""
+    #     # 缓存功能已禁用，不执行任何操作
+    #     pass
     
     async def get_identification_statistics(self) -> Dict[str, Any]:
         """获取识别统计信息"""
