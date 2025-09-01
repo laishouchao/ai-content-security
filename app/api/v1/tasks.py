@@ -913,7 +913,7 @@ async def get_task_subdomains(
             subdomain_data = {
                 "id": subdomain.id,
                 "task_id": subdomain.task_id,
-                "subdomain": subdomain.subdomain,
+                "subdomain": subdomain.domain,  # 使用domain字段
                 "ip_address": subdomain.ip_address,
                 "discovery_method": subdomain.discovery_method,
                 "is_accessible": subdomain.is_accessible,

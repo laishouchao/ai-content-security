@@ -369,10 +369,13 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
     """保存扫描结果到数据库"""
     try:
         # 保存子域名记录
+        from app.models.domain import DomainCategory, DomainStatus
         for subdomain in scan_result.subdomains:
             subdomain_record = DomainRecord(
                 task_id=scan_result.task_id,
-                subdomain=subdomain.subdomain,
+                domain=subdomain.subdomain,  # DomainRecord使用domain字段
+                category=DomainCategory.TARGET_SUBDOMAIN,  # 设置为子域名类型
+                status=DomainStatus.ACCESSIBLE if subdomain.is_accessible else DomainStatus.INACCESSIBLE,
                 ip_address=subdomain.ip_address,
                 discovery_method=subdomain.method,
                 is_accessible=subdomain.is_accessible,
@@ -421,14 +424,16 @@ async def _save_scan_results(db, scan_result: ScanExecutionResult):
                 third_party_record = DomainRecord(
                     task_id=scan_result.task_id,
                     domain=third_party.domain,
-                    found_on_url=', '.join(third_party.found_on_urls[:3]),  # 限制长度
-                    domain_type=third_party.domain_type,
+                    found_on_urls=third_party.found_on_urls[:3],  # 限制数量
+                    category=DomainCategory.THIRD_PARTY,  # 第三方域名类型
+                    status=DomainStatus.DISCOVERED,  # 初始状态
+                    discovery_method='third_party_scan',
                     risk_level=third_party.risk_level,
-                    page_title=f"{third_party.domain} - {third_party.description}",
-                    page_description=third_party.description,
+                    page_title=f"{third_party.domain} - {getattr(third_party, 'description', '第三方域名')}",
+                    page_description=getattr(third_party, 'description', None),
                     screenshot_path=screenshot_path,
                     is_analyzed=True if hasattr(scan_result, 'violation_records') else False,  # 根据是否有AI分析结果设置
-                    created_at=third_party.discovered_at
+                    # created_at有默认值，不需要手动设置
                 )
                 db.add(third_party_record)
         

@@ -622,7 +622,7 @@ class InfiniteCrawlerEngine:
             for result in enhanced_results:
                 # 转换为SubdomainResult格式
                 subdomain_result = SubdomainResult(
-                    subdomain=result.subdomain,
+                    subdomain=result.subdomain,  # SubdomainResult类需要subdomain参数
                     method=result.discovery_method,
                     ip_address=result.ip_addresses[0] if result.ip_addresses else None
                 )

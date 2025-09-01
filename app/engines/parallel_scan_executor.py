@@ -629,7 +629,7 @@ class ParallelScanExecutor:
                 temp_domain = DomainRecord(
                     task_id=self.task_id,
                     domain=domain_name,
-                    found_on_url=content_result.url,
+                    found_on_urls=[content_result.url],  # 使用正确字段名
                     screenshot_path=content_result.screenshot_path,
                     page_title=getattr(content_result, 'page_title', ''),
                     page_description=getattr(content_result, 'page_description', ''),

@@ -521,7 +521,7 @@ class AIAnalysisEngine:
         
         return template.format(
             domain=str(domain.domain),
-            found_on_url=domain.found_on_url[:200],  # 限制长度
+            found_on_urls=[getattr(domain, 'found_on_urls', []) or []],  # 使用正确字段名
             domain_type=domain.domain_type,
             page_title=str(domain.page_title) if domain.page_title is not None else "无标题",
             page_description=str(domain.page_description) if domain.page_description is not None else "无描述"

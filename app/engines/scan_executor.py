@@ -242,7 +242,7 @@ class ScanTaskExecutor:
                         # 转换为子域名格式
                         from app.engines.subdomain_discovery import SubdomainResult
                         subdomain_result = SubdomainResult(
-                            subdomain=str(domain_record.domain),
+                            subdomain=str(domain_record.domain),  # SubdomainResult类需要subdomain参数
                             method=str(domain_record.discovery_method),
                             ip_address=str(domain_record.ip_address) if domain_record.ip_address is not None else None
                         )
@@ -796,7 +796,7 @@ class ScanTaskExecutor:
                         
                         for content_result in result.content_results:
                             self.logger.debug(f"检查内容结果: URL={content_result.url}, 截图路径={content_result.screenshot_path}")
-                            if str(subdomain_record.subdomain) in content_result.url:
+                            if str(subdomain_record.domain) in content_result.url:
                                 screenshot_path = content_result.screenshot_path
                                 self.logger.debug(f"找到匹配的截图: {screenshot_path}")
                                 break
@@ -804,27 +804,27 @@ class ScanTaskExecutor:
                         if screenshot_path:
                             # 验证截图文件是否存在
                             screenshot_file_exists = Path(screenshot_path).exists()
-                            self.logger.debug(f"子域名 {subdomain_record.subdomain} 截图路径: {screenshot_path}, 文件存在: {screenshot_file_exists}")
+                            self.logger.debug(f"子域名 {subdomain_record.domain} 截图路径: {screenshot_path}, 文件存在: {screenshot_file_exists}")
                             
                             if screenshot_file_exists:
                                 # 创建一个临时的第三方域名对象用于AI分析
                                 subdomain_for_analysis = type('SubdomainForAnalysis', (), {
                                     'id': subdomain_record.id,
-                                    'domain': subdomain_record.subdomain,
+                                    'domain': subdomain_record.domain,
                                     'screenshot_path': screenshot_path,
-                                    'page_title': subdomain_record.page_title or f"{subdomain_record.subdomain} - 子域名主页",
-                                    'page_description': f"目标域名的子域名: {subdomain_record.subdomain}",
+                                    'page_title': subdomain_record.page_title or f"{subdomain_record.domain} - 子域名主页",
+                                    'page_description': f"目标域名的子域名: {subdomain_record.domain}",
                                     'is_analyzed': False,
                                     'domain_type': 'subdomain',  # 标记为子域名类型
                                     'cached_analysis_result': None
                                 })()
                                 
                                 domains_to_analyze.append(subdomain_for_analysis)
-                                self.logger.info(f"子域名 {subdomain_record.subdomain} 已添加到AI分析队列")
+                                self.logger.info(f"子域名 {subdomain_record.domain} 已添加到AI分析队列")
                             else:
-                                self.logger.warning(f"子域名 {subdomain_record.subdomain} 截图文件不存在: {screenshot_path}")
+                                self.logger.warning(f"子域名 {subdomain_record.domain} 截图文件不存在: {screenshot_path}")
                         else:
-                            self.logger.warning(f"子域名 {subdomain_record.subdomain} 没有找到匹配的截图文件")
+                            self.logger.warning(f"子域名 {subdomain_record.domain} 没有找到匹配的截图文件")
                 
                 await db.commit()
                 
@@ -979,7 +979,7 @@ class ScanTaskExecutor:
                 for subdomain in result.subdomains:
                     subdomain_record = DomainRecord(
                         task_id=result.task_id,
-                        subdomain=subdomain.subdomain,
+                        domain=subdomain.subdomain,  # 使用domain字段
                         ip_address=subdomain.ip_address,
                         discovery_method=subdomain.method,
                         is_accessible=subdomain.is_accessible,
@@ -1018,7 +1018,7 @@ class ScanTaskExecutor:
                 from sqlalchemy import select
                 existing_query = select(DomainRecord).where(
                     DomainRecord.task_id == task_id,
-                    DomainRecord.subdomain == subdomain.subdomain
+                    DomainRecord.domain == subdomain.subdomain
                 )
                 existing_result = await db.execute(existing_query)
                 existing_record = existing_result.scalar_one_or_none()
@@ -1028,9 +1028,12 @@ class ScanTaskExecutor:
                     return
                 
                 # 创建新记录
+                from app.models.domain import DomainCategory, DomainStatus
                 subdomain_record = DomainRecord(
                     task_id=task_id,
-                    subdomain=subdomain.subdomain,
+                    domain=subdomain.subdomain,
+                    category=DomainCategory.TARGET_SUBDOMAIN,
+                    status=DomainStatus.DISCOVERED,
                     ip_address=subdomain.ip_address,
                     discovery_method=subdomain.method,
                     is_accessible=subdomain.is_accessible,
@@ -1137,7 +1140,7 @@ class ScanTaskExecutor:
 
         try:
             from app.core.database import AsyncSessionLocal
-            from app.models.domain import DomainRecord
+            from app.models.domain import DomainRecord, DomainCategory, DomainStatus
             from app.models.task import ScanTask
             from sqlalchemy import update
             
@@ -1160,14 +1163,16 @@ class ScanTaskExecutor:
                         third_party_record = DomainRecord(
                             task_id=result.task_id,
                             domain=third_party.domain,
-                            found_on_url=found_on_url,
-                            domain_type=third_party.domain_type,
+                            found_on_urls=third_party.found_on_urls,  # 使用found_on_urls字段
+                            category=DomainCategory.THIRD_PARTY,  # 设置第三方域名类型
+                            status=DomainStatus.DISCOVERED,  # 设置初始状态
+                            discovery_method='third_party_scan',  # 发现方法
                             risk_level=third_party.risk_level,
-                            page_title=f"{third_party.domain} - {third_party.description}"[:500],  # 限制标题长度
-                            page_description=third_party.description[:1000] if third_party.description else None,  # 限制描述长度
+                            page_title=f"{third_party.domain} - {getattr(third_party, 'description', '第三方域名')}"[:500],  # 限制标题长度
+                            page_description=(getattr(third_party, 'description', '') or '')[:1000] or None,  # 限制描述长度
                             screenshot_path=screenshot_path[:500] if screenshot_path else None,  # 限制路径长度
                             is_analyzed=False,  # 初始时未进行AI分析
-                            created_at=third_party.discovered_at
+                            # created_at 字段有默认值，不需要手动设置
                         )
                         db.add(third_party_record)
                         saved_count += 1
